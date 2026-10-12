@@ -26,13 +26,32 @@
         }
       },
       "battery": {
-        "title": "Battery and solar arrays",
+        "title": "Battery",
         "data": {
           "battery_kwh": "Usable battery capacity",
-          "array_count": "Number of PV strings or arrays"
+          "pack_count": "Number of battery packs",
+          "pack_discharge_a": "Discharge limit per pack",
+          "cell_v_max": "Maximum cell voltage"
         },
         "data_description": {
-          "battery_kwh": "Enter 0 to work it out from the log."
+          "battery_kwh": "Enter 0 to work it out from the log.",
+          "pack_discharge_a": "The BMS discharge limit drops when a pack goes offline, so this is how missing packs are spotted.",
+          "cell_v_max": "3.65 V for LiFePO4 cells."
+        }
+      },
+      "arrays": {
+        "title": "Solar arrays and inverter limits",
+        "data": {
+          "array_names": "Array names",
+          "mppt_limits_a": "MPPT input current limits",
+          "pv_max_v": "Maximum PV input voltage",
+          "output_ceiling_kw": "AC output ceiling"
+        },
+        "data_description": {
+          "array_names": "One name per MPPT input, comma-separated, for example South,East,West.",
+          "mppt_limits_a": "Amps per MPPT input in the same order, for example 26,26,15. Leave empty to skip this check.",
+          "pv_max_v": "0 skips this check.",
+          "output_ceiling_kw": "0 skips this check."
         }
       },
       "grid": {
@@ -40,9 +59,16 @@
         "data": {
           "import_rate": "Import rate",
           "export_credit": "Export credit",
+          "service_charge": "Monthly service charge",
+          "utility_name": "Utility name",
           "nominal_voltage": "Nominal grid voltage",
           "hv_watch": "High-voltage Watch threshold",
           "hv_act": "High-voltage Act threshold"
+        },
+        "data_description": {
+          "service_charge": "Left out of the solar value, since you pay it either way.",
+          "utility_name": "Used in advice such as asking your utility about line voltage.",
+          "hv_act": "Typical grid-tie over-voltage trip is 110% of nominal (264 V on 240 V). Check your inverter's setting."
         }
       },
       "reauth_confirm": {
@@ -57,7 +83,9 @@
       "invalid_auth": "The Monitor Center rejected that username or password.",
       "cannot_connect": "Could not reach the Monitor Center. Check the server and try again.",
       "no_plants": "This account has no stations.",
-      "no_inverters": "No inverters were found on this station."
+      "no_inverters": "No inverters were found on this station.",
+      "no_arrays": "Enter at least one array name.",
+      "bad_mppt_limits": "Enter one number per array, in the same order as the names."
     },
     "abort": {
       "already_configured": "This station is already set up.",

@@ -21,16 +21,34 @@ CONF_SYSTEM_TYPE = "system_type"
 CONF_PARALLEL_COUNT = "parallel_count"
 CONF_GRIDBOSS = "gridboss"
 CONF_BATTERY_KWH = "battery_kwh"
-CONF_ARRAY_COUNT = "array_count"
+CONF_PACK_COUNT = "pack_count"
+CONF_PACK_DISCHARGE_A = "pack_discharge_a"
+CONF_CELL_V_MAX = "cell_v_max"
+CONF_ARRAY_NAMES = "array_names"
+CONF_MPPT_LIMITS_A = "mppt_limits_a"
+CONF_PV_MAX_V = "pv_max_v"
+CONF_OUTPUT_CEILING_KW = "output_ceiling_kw"
 CONF_IMPORT_RATE = "import_rate"
 CONF_EXPORT_CREDIT = "export_credit"
 CONF_NOMINAL_VOLTAGE = "nominal_voltage"
 CONF_HV_WATCH = "hv_watch"
 CONF_HV_ACT = "hv_act"
+CONF_SERVICE_CHARGE = "service_charge"
+CONF_UTILITY_NAME = "utility_name"
 
 SYSTEM_TYPES = ["FlexBOSS21", "FlexBOSS18", "18kPV", "12kPV", "6000XP", "Other"]
 
 DEFAULT_BATTERY_KWH = 0  # 0 = infer from the log
+DEFAULT_PACK_COUNT = 4
+DEFAULT_PACK_DISCHARGE_A = 200  # BMS discharge limit per pack; 4 packs = 800 A
+DEFAULT_CELL_V_MAX = 3.65  # LiFePO4
+DEFAULT_ARRAY_NAMES = "Array 1"
+
+# Inverter limits by system type, used to pre-fill setup. 0 or empty = unknown, so that check is skipped
+SYSTEM_PROFILES = {
+    "FlexBOSS21": {"mppt_limits_a": "26,26,15", "pv_max_v": 600, "output_ceiling_kw": 16},
+}
+EMPTY_PROFILE = {"mppt_limits_a": "", "pv_max_v": 0, "output_ceiling_kw": 0}
 DEFAULT_NOMINAL_VOLTAGE = 240
 DEFAULT_HV_WATCH = 255
 DEFAULT_HV_ACT = 264

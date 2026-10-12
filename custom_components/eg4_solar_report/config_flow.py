@@ -27,31 +27,44 @@ from homeassistant.helpers.selector import (
 
 from .api import Eg4AuthError, Eg4Error, Eg4MonitorClient
 from .const import (
-    CONF_ARRAY_COUNT,
+    CONF_ARRAY_NAMES,
     CONF_BATTERY_KWH,
+    CONF_CELL_V_MAX,
     CONF_EXPORT_CREDIT,
     CONF_GRIDBOSS,
     CONF_HV_ACT,
     CONF_HV_WATCH,
     CONF_IMPORT_RATE,
     CONF_INVERTERS,
+    CONF_MPPT_LIMITS_A,
     CONF_NOMINAL_VOLTAGE,
+    CONF_OUTPUT_CEILING_KW,
+    CONF_PACK_COUNT,
+    CONF_PACK_DISCHARGE_A,
     CONF_PARALLEL_COUNT,
     CONF_PASSWORD,
     CONF_PLANT_ID,
     CONF_PLANT_NAME,
+    CONF_PV_MAX_V,
     CONF_SERVER,
+    CONF_SERVICE_CHARGE,
     CONF_SYSTEM_TYPE,
     CONF_USERNAME,
+    CONF_UTILITY_NAME,
+    DEFAULT_ARRAY_NAMES,
     DEFAULT_BATTERY_KWH,
+    DEFAULT_CELL_V_MAX,
     DEFAULT_HV_ACT,
     DEFAULT_HV_WATCH,
     DEFAULT_NOMINAL_VOLTAGE,
     DEFAULT_OUTAGE_DELAY,
+    DEFAULT_PACK_COUNT,
+    DEFAULT_PACK_DISCHARGE_A,
     DEFAULT_SERVER,
     DEFAULT_WEEKLY_DAY,
     DEFAULT_WEEKLY_TIME,
     DOMAIN,
+    EMPTY_PROFILE,
     OPT_KNOWN_ISSUES,
     OPT_NOTIFY_SERVICE,
     OPT_NOTIFY_SEVERITIES,
@@ -65,6 +78,7 @@ from .const import (
     SEVERITY_ACT,
     SEVERITY_INFO,
     SEVERITY_WATCH,
+    SYSTEM_PROFILES,
     SYSTEM_TYPES,
     WEEKDAYS,
 )
@@ -78,6 +92,18 @@ def _number(min_v: float, max_v: float, step: float, unit: str | None = None) ->
             min=min_v, max=max_v, step=step, unit_of_measurement=unit, mode=NumberSelectorMode.BOX
         )
     )
+
+
+def _split_csv(value: str) -> list[str]:
+    return [p.strip() for p in (value or "").split(",") if p.strip()]
+
+
+def _is_number(value: str) -> bool:
+    try:
+        float(value)
+    except ValueError:
+        return False
+    return True
 
 
 def _guess_system_type(model: str) -> str:
@@ -219,23 +245,57 @@ class Eg4SolarReportConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_battery(self, user_input: dict[str, Any] | None = None):
-        """Step 3: battery and arrays."""
+        """Step 3: battery."""
         if user_input is not None:
             self._data.update(user_input)
-            return await self.async_step_grid()
+            return await self.async_step_arrays()
 
         return self.async_show_form(
             step_id="battery",
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_BATTERY_KWH, default=DEFAULT_BATTERY_KWH): _number(0, 1000, 0.1, "kWh"),
-                    vol.Required(CONF_ARRAY_COUNT, default=1): _number(1, 20, 1),
+                    vol.Required(CONF_PACK_COUNT, default=DEFAULT_PACK_COUNT): _number(1, 64, 1),
+                    vol.Required(CONF_PACK_DISCHARGE_A, default=DEFAULT_PACK_DISCHARGE_A): _number(10, 1000, 1, "A"),
+                    vol.Required(CONF_CELL_V_MAX, default=DEFAULT_CELL_V_MAX): _number(2, 5, 0.01, "V"),
                 }
             ),
         )
 
+    async def async_step_arrays(self, user_input: dict[str, Any] | None = None):
+        """Step 4: PV arrays and inverter limits (pre-filled for known system types)."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            names = _split_csv(user_input[CONF_ARRAY_NAMES])
+            limits = _split_csv(user_input.get(CONF_MPPT_LIMITS_A, ""))
+            if not names:
+                errors[CONF_ARRAY_NAMES] = "no_arrays"
+            elif limits and (len(limits) != len(names) or not all(_is_number(v) for v in limits)):
+                errors[CONF_MPPT_LIMITS_A] = "bad_mppt_limits"
+            else:
+                user_input[CONF_ARRAY_NAMES] = ",".join(names)
+                user_input[CONF_MPPT_LIMITS_A] = ",".join(limits)
+                self._data.update(user_input)
+                return await self.async_step_grid()
+
+        profile = SYSTEM_PROFILES.get(self._data.get(CONF_SYSTEM_TYPE), EMPTY_PROFILE)
+        return self.async_show_form(
+            step_id="arrays",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_ARRAY_NAMES, default=DEFAULT_ARRAY_NAMES): str,
+                    vol.Optional(
+                        CONF_MPPT_LIMITS_A, description={"suggested_value": profile["mppt_limits_a"]}
+                    ): str,
+                    vol.Required(CONF_PV_MAX_V, default=profile["pv_max_v"]): _number(0, 1500, 1, "V"),
+                    vol.Required(CONF_OUTPUT_CEILING_KW, default=profile["output_ceiling_kw"]): _number(0, 200, 0.1, "kW"),
+                }
+            ),
+            errors=errors,
+        )
+
     async def async_step_grid(self, user_input: dict[str, Any] | None = None):
-        """Step 4: grid and rates."""
+        """Step 5: grid and rates."""
         if user_input is not None:
             self._data.update(user_input)
             return self.async_create_entry(title=self._data[CONF_PLANT_NAME], data=self._data)
@@ -246,13 +306,14 @@ class Eg4SolarReportConfigFlow(ConfigFlow, domain=DOMAIN):
                 {
                     vol.Required(CONF_IMPORT_RATE, default=0.12): _number(0, 5, 0.0001, "$/kWh"),
                     vol.Required(CONF_EXPORT_CREDIT, default=0.0): _number(0, 5, 0.0001, "$/kWh"),
+                    vol.Required(CONF_SERVICE_CHARGE, default=0.0): _number(0, 1000, 0.01, "$/month"),
+                    vol.Optional(CONF_UTILITY_NAME): str,
                     vol.Required(CONF_NOMINAL_VOLTAGE, default=DEFAULT_NOMINAL_VOLTAGE): _number(100, 480, 1, "V"),
                     vol.Required(CONF_HV_WATCH, default=DEFAULT_HV_WATCH): _number(100, 500, 1, "V"),
                     vol.Required(CONF_HV_ACT, default=DEFAULT_HV_ACT): _number(100, 500, 1, "V"),
                 }
             ),
         )
-
     async def async_step_reauth(self, entry_data: dict[str, Any]):
         return await self.async_step_reauth_confirm()
 

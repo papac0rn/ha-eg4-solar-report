@@ -19,7 +19,18 @@ from homeassistant.util import dt as dt_util
 from . import analyzer
 from .api import Eg4AuthError, Eg4Error, Eg4MonitorClient
 from .const import (
+    CONF_ARRAY_NAMES,
     CONF_BATTERY_KWH,
+    CONF_CELL_V_MAX,
+    CONF_GRIDBOSS,
+    CONF_MPPT_LIMITS_A,
+    CONF_OUTPUT_CEILING_KW,
+    CONF_PACK_COUNT,
+    CONF_PACK_DISCHARGE_A,
+    CONF_PARALLEL_COUNT,
+    CONF_PV_MAX_V,
+    CONF_SERVICE_CHARGE,
+    CONF_UTILITY_NAME,
     CONF_EXPORT_CREDIT,
     CONF_HV_ACT,
     CONF_HV_WATCH,
@@ -157,11 +168,24 @@ class ReportManager:
 
     def _settings(self) -> dict[str, Any]:
         data, opts = self.entry.data, self.entry.options
+        names = [n.strip() for n in data.get(CONF_ARRAY_NAMES, "").split(",") if n.strip()]
+        limits = [float(v) for v in data.get(CONF_MPPT_LIMITS_A, "").split(",") if v.strip()]
         return {
             "system_type": data.get(CONF_SYSTEM_TYPE),
+            "parallel_count": int(data.get(CONF_PARALLEL_COUNT, 1)),
+            "gridboss": data.get(CONF_GRIDBOSS, False),
             "battery_kwh": data.get(CONF_BATTERY_KWH),
+            "pack_count": int(data.get(CONF_PACK_COUNT, 0)),
+            "pack_discharge_a": data.get(CONF_PACK_DISCHARGE_A),
+            "cell_v_max": data.get(CONF_CELL_V_MAX),
+            "array_names": names,
+            "mppt_limits_a": limits,
+            "pv_max_v": data.get(CONF_PV_MAX_V) or None,
+            "output_ceiling_kw": data.get(CONF_OUTPUT_CEILING_KW) or None,
             "import_rate": data.get(CONF_IMPORT_RATE),
             "export_credit": data.get(CONF_EXPORT_CREDIT),
+            "service_charge": data.get(CONF_SERVICE_CHARGE),
+            "utility_name": data.get(CONF_UTILITY_NAME) or "your utility",
             "nominal_voltage": data.get(CONF_NOMINAL_VOLTAGE),
             "hv_watch": data.get(CONF_HV_WATCH),
             "hv_act": data.get(CONF_HV_ACT),

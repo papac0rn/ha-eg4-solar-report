@@ -27,7 +27,7 @@ class ReportSensor(ReportEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = [VERDICT_HEALTHY, VERDICT_WATCH, VERDICT_ACT, VERDICT_ERROR]
     # Keep the big attributes out of the recorder database
-    _unrecorded_attributes = frozenset({"findings", "numbers", "series"})
+    _unrecorded_attributes = frozenset({"checks", "findings", "numbers", "daily", "series"})
 
     def __init__(self, manager: ReportManager, entry: ConfigEntry) -> None:
         super().__init__(manager, entry, "report")
@@ -55,9 +55,13 @@ class ReportSensor(ReportEntity, SensorEntity):
             "range": report.get("range"),
             "trigger": report.get("trigger"),
             "generated_at": report.get("generated_at"),
+            "summary": report.get("summary"),
+            "samples": report.get("samples"),
             "counts": report.get("counts"),
+            "checks": report.get("checks", []),
             "findings": report.get("findings", []),
             "numbers": report.get("numbers", {}),
+            "daily": report.get("daily", []),
             "series": report.get("series", {}),
         }
 

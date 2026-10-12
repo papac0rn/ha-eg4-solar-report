@@ -21,11 +21,29 @@ You get a plain verdict (**healthy / watch / act**) plus a list of findings, for
 1. **Account:** server, Monitor Center username and password. These are checked by signing in.
 2. **Station:** chosen automatically if your account has only one.
 3. **System:** which inverters to include, system type (detected), parallel count, GridBOSS.
-4. **Battery and arrays:** usable battery kWh (0 = work it out from the log) and the number of PV strings.
-5. **Grid and rates:** import rate, export credit, nominal grid voltage, and the high-voltage Watch/Act thresholds.
+4. **Battery:** usable kWh (0 = work it out from the log), pack count, discharge limit per pack, max cell voltage.
+5. **Arrays:** a name per MPPT input, plus the MPPT current limits, max PV voltage and AC output ceiling. These are
+   pre-filled for known system types; leave a limit empty or 0 to skip that check.
+6. **Grid and rates:** import rate, export credit, monthly service charge, utility name, nominal grid voltage, and the
+   high-voltage Watch/Act thresholds (default 255 / 264 V).
 
 **Configure** (later): weekly report day and time, a report after a grid outage (with a delay so EG4's cloud catches up),
 a notify service with which severities to push, and known issues to report as Info.
+
+## The 21 checks
+
+Each check is rated **OK**, **Info** (worth knowing), **Watch** (keep an eye on it) or **Act** (needs attention).
+
+| Group | Checks |
+|---|---|
+| Grid | Outages and blips · Transient-failure signature (W016–W018) · High grid voltage · Low grid voltage · Grid frequency |
+| Battery | Pack-dropout signature (W004 + W027) · All packs online · Cell balance · Cell voltage limits · Cell temperature · State of health · Grid carrying load while the battery sits out |
+| Inverter | Fault codes · Warning codes · Heatsink temperature · Output ceiling · MPPT current · PV string voltage |
+| Arrays | Array balance (weather vs. array problem) |
+| Data | Logger gaps · Energy counter cross-check |
+
+The report only sees what the inverter logs. Thresholds such as the 264 V trip point are typical values, so confirm
+them against your own inverter settings.
 
 ## Entities
 
