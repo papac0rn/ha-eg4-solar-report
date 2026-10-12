@@ -27,7 +27,7 @@
       },
       "battery": {
         "title": "Battery",
-        "description": "Battery size reported by the BMS: {bms}. Check it against your packs' rated capacity and adjust if needed.",
+        "description": "Battery size: {bms}. Check it against your packs' rated capacity and adjust if needed.",
         "data": {
           "battery_kwh": "Usable battery capacity",
           "pack_count": "Number of battery packs",

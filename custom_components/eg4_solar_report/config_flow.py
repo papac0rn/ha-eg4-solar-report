@@ -25,6 +25,7 @@ from homeassistant.helpers.selector import (
     TimeSelector,
 )
 
+from . import ha_eg4
 from .api import Eg4AuthError, Eg4Error, Eg4MonitorClient
 from .const import (
     CONF_ARRAY_NAMES,
@@ -255,14 +256,17 @@ class Eg4SolarReportConfigFlow(ConfigFlow, domain=DOMAIN):
             return await self.async_step_arrays()
 
         if self._battery is None and self._client and self._data.get(CONF_INVERTERS):
-            self._battery = await self._client.async_get_battery(self._data[CONF_INVERTERS][0]) or {}
+            serial = self._data[CONF_INVERTERS][0]
+            # The EG4 Web Monitor integration's battery-bank sensors first, then the Monitor Center
+            self._battery = ha_eg4.battery_bank(self.hass, serial) or await self._client.async_get_battery(serial) or {}
         bank = self._battery or {}
         kwh_default = bank.get("kwh") or DEFAULT_BATTERY_KWH
         packs_default = bank.get("packs") or DEFAULT_PACK_COUNT
         return self.async_show_form(
             step_id="battery",
             description_placeholders={
-                "bms": f"{bank['ah']:g} Ah × 51.2 V = {bank['kwh']:g} kWh" if bank.get("kwh") else "not reported"
+                "bms": f"{bank['ah']:g} Ah × 51.2 V = {bank['kwh']:g} kWh, from the {bank['source']}"
+                if bank.get("kwh") else "not reported"
             },
             data_schema=vol.Schema(
                 {

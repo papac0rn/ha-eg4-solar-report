@@ -64,7 +64,8 @@ OPT_NOTIFY_SERVICE = "notify_service"
 OPT_NOTIFY_SEVERITIES = "notify_severities"
 OPT_KNOWN_ISSUES = "known_issues"
 
-# Temperature thresholds (°C): sensor class -> (watch, act); heatsinks leave room above a normal 93 °C summer peak
+# Temperature thresholds (°C): sensor class -> (watch, act). No published FlexBOSS heatsink derate point was found
+# (EG4 docs, pylxpweb); 95/105 leaves room above a 93 °C summer peak that was normal. Editable in options.
 TEMP_THRESHOLDS = {
     "heatsink": (95, 105),
     "internal": (70, 80),

@@ -84,7 +84,7 @@ class Eg4MonitorClient:
         packs = info.totalNumber or len(info.batteryArray) or None
         if not ah or not 20 <= ah <= 20000:
             return {"ah": None, "packs": packs, "kwh": None}
-        return {"ah": ah, "packs": packs, "kwh": round(ah * NOMINAL_PACK_V / 1000, 1)}
+        return {"ah": ah, "packs": packs, "kwh": round(ah * NOMINAL_PACK_V / 1000, 1), "source": "Monitor Center BMS"}
 
     async def async_download_export(self, serial: str, start: date, end: date) -> bytes:
         """Return the .xls data export for one inverter, one sheet per day (at most 10 days)."""

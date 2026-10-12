@@ -383,7 +383,7 @@ def _build_ctx(log: Log, settings: dict[str, Any], start: date, end: date) -> Ct
         })
 
     ctx.battery_kwh = float(settings["battery_kwh"]) if settings.get("battery_kwh") else _infer_capacity(log)
-    ctx.soc_floor = _infer_soc_floor(log)
+    ctx.soc_floor = float(settings["soc_floor"]) if settings.get("soc_floor") else _infer_soc_floor(log)
     return ctx
 
 
@@ -1161,7 +1161,7 @@ def temperatures(c: Ctx) -> list[dict[str, Any]]:
         status = "act" if top >= act else "watch" if top >= watch else "ok"
         note = ""
         if len(v) > 50 and min(v) == top:
-            note = f"reads {top:g} °C the whole period; the sensor may not be connected"
+            note = f"the export reads {top:g} °C the whole period, so this column may not carry the live reading"
         if cls == "cell" and min(v) < 0:
             status, note = "act", "below freezing; the BMS limits charging"
         if col == "tradiator1" and gap is not None:

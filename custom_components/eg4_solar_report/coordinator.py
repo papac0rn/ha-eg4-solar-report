@@ -16,7 +16,7 @@ from homeassistant.helpers.event import (
 )
 from homeassistant.util import dt as dt_util
 
-from . import analyzer, charts
+from . import analyzer, charts, ha_eg4
 from .api import Eg4AuthError, Eg4Error, Eg4MonitorClient
 from .const import (
     CONF_ARRAY_NAMES,
@@ -194,6 +194,8 @@ class ReportManager:
             "hv_watch": data.get(CONF_HV_WATCH),
             "hv_act": data.get(CONF_HV_ACT),
             "known_issues": opts.get(OPT_KNOWN_ISSUES, ""),
+            # From the EG4 Web Monitor integration when installed; otherwise the analyzer infers it
+            "soc_floor": ha_eg4.soc_floor(self.hass, data[CONF_INVERTERS][0]),
             "temp_imbalance": opts.get(OPT_TEMP_IMBALANCE),
             **{
                 f"temp_{cls}_{level}": opts.get(f"temp_{cls}_{level}")
