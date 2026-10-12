@@ -25,7 +25,7 @@ You get a plain verdict (**healthy / watch / act**) plus a list of findings, for
 5. **Arrays:** a name per MPPT input, plus the MPPT current limits, max PV voltage and AC output ceiling. These are
    pre-filled for known system types; leave a limit empty or 0 to skip that check.
 6. **Grid and rates:** import rate, export credit, monthly service charge, utility name, nominal grid voltage, and the
-   high-voltage Watch/Act thresholds (default 255 / 264 V).
+   high-voltage Watch/Act thresholds (default 254 / 264 V).
 
 **Configure** (later): weekly report day and time, a report after a grid outage (with a delay so EG4's cloud catches up),
 a notify service with which severities to push, and known issues to report as Info.
@@ -55,10 +55,12 @@ them against your own inverter settings.
 | `sensor.<station>_report` | Verdict (`healthy` / `watch` / `act` / `error`); counts, findings, key numbers and chart series as attributes |
 | `binary_sensor.<station>_action_needed` | On when the verdict is `act` or the report failed |
 | `sensor.<station>_last_generated` | When the last report finished |
-| `image.<station>_chart_daily_pv` | Daily PV harvest by array (stacked columns) |
-| `image.<station>_chart_pv_load` | PV production vs. home load |
-| `image.<station>_chart_soc` | Battery state of charge |
-| `image.<station>_chart_grid_voltage` | Grid voltage with the Watch and trip thresholds |
+| `image.<station>_chart_harvest` | Daily harvest by array (stacked columns) |
+| `image.<station>_chart_energy` | Daily house load, export and import |
+| `image.<station>_chart_pv_ac` | PV total vs. inverter AC output, with the AC ceiling |
+| `image.<station>_chart_grid_voltage` | Line voltage with the Watch and trip thresholds |
+| `image.<station>_chart_soc` | Battery state of charge, with its floor |
+| `image.<station>_chart_cell_voltage` | Highest and lowest cell voltage, with the cell limit |
 
 The charts are drawn by the integration itself as SVG images and redrawn on every run. Show them with the built-in
 **Picture entity** card; no custom cards are needed.

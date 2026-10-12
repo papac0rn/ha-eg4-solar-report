@@ -11,10 +11,12 @@ from .coordinator import ReportManager
 from .entity import ReportEntity
 
 CHART_NAMES = {
-    "daily_pv": "Chart Daily PV",
-    "pv_load": "Chart PV Load",
-    "soc": "Chart SOC",
+    "harvest": "Chart Harvest",
+    "energy": "Chart Energy",
+    "pv_ac": "Chart PV AC",
     "grid_voltage": "Chart Grid Voltage",
+    "soc": "Chart SOC",
+    "cell_voltage": "Chart Cell Voltage",
 }
 
 

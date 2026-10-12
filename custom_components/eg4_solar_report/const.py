@@ -50,7 +50,7 @@ SYSTEM_PROFILES = {
 }
 EMPTY_PROFILE = {"mppt_limits_a": "", "pv_max_v": 0, "output_ceiling_kw": 0}
 DEFAULT_NOMINAL_VOLTAGE = 240
-DEFAULT_HV_WATCH = 255
+DEFAULT_HV_WATCH = 254
 DEFAULT_HV_ACT = 264
 
 # Options
