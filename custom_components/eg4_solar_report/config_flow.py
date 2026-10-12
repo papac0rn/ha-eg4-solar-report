@@ -6,6 +6,7 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
+from homeassistant.const import UnitOfTemperature
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.helpers.selector import (
@@ -83,6 +84,7 @@ from .const import (
     SYSTEM_TYPES,
     TEMP_THRESHOLDS,
     OPT_TEMP_IMBALANCE,
+    OPT_TEMP_UNIT,
     DEFAULT_TEMP_IMBALANCE,
     WEEKDAYS,
 )
@@ -219,6 +221,18 @@ class Eg4SolarReportConfigFlow(ConfigFlow, domain=DOMAIN):
         """Step 2b: inverters and system type."""
         if user_input is not None:
             self._data.update(user_input)
+            serial = self._data[CONF_INVERTERS][0]
+            # The EG4 Web Monitor integration's battery-bank sensors first, then the Monitor Center BMS
+            self._battery = ha_eg4.battery_bank(self.hass, serial) or await self._client.async_get_battery(serial) or {}
+            if self._battery.get("kwh") and self._battery.get("packs"):
+                # Found it, so don't ask. The per-pack limit is learned from the log; all of it is editable in Configure.
+                self._data.update({
+                    CONF_BATTERY_KWH: self._battery["kwh"],
+                    CONF_PACK_COUNT: self._battery["packs"],
+                    CONF_PACK_DISCHARGE_A: 0,
+                    CONF_CELL_V_MAX: DEFAULT_CELL_V_MAX,
+                })
+                return await self.async_step_arrays()
             return await self.async_step_battery()
 
         serials = [i["serial"] for i in self._inverters]
@@ -250,15 +264,11 @@ class Eg4SolarReportConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_battery(self, user_input: dict[str, Any] | None = None):
-        """Step 3: battery, pre-filled from the BMS when it reports its capacity."""
+        """Step 3: battery, asked only when neither the EG4 integration nor the BMS reports it."""
         if user_input is not None:
             self._data.update(user_input)
             return await self.async_step_arrays()
 
-        if self._battery is None and self._client and self._data.get(CONF_INVERTERS):
-            serial = self._data[CONF_INVERTERS][0]
-            # The EG4 Web Monitor integration's battery-bank sensors first, then the Monitor Center
-            self._battery = ha_eg4.battery_bank(self.hass, serial) or await self._client.async_get_battery(serial) or {}
         bank = self._battery or {}
         kwh_default = bank.get("kwh") or DEFAULT_BATTERY_KWH
         packs_default = bank.get("packs") or DEFAULT_PACK_COUNT
@@ -272,7 +282,7 @@ class Eg4SolarReportConfigFlow(ConfigFlow, domain=DOMAIN):
                 {
                     vol.Required(CONF_BATTERY_KWH, default=kwh_default): _number(0, 1000, 0.1, "kWh"),
                     vol.Required(CONF_PACK_COUNT, default=packs_default): _number(1, 64, 1),
-                    vol.Required(CONF_PACK_DISCHARGE_A, default=DEFAULT_PACK_DISCHARGE_A): _number(10, 1000, 1, "A"),
+                    vol.Required(CONF_PACK_DISCHARGE_A, default=0): _number(0, 1000, 1, "A"),
                     vol.Required(CONF_CELL_V_MAX, default=DEFAULT_CELL_V_MAX): _number(2, 5, 0.01, "V"),
                 }
             ),
@@ -371,12 +381,31 @@ class Eg4SolarReportConfigFlow(ConfigFlow, domain=DOMAIN):
         return Eg4SolarReportOptionsFlow()
 
 
+def _default_unit(hass) -> str:
+    return "F" if hass.config.units.temperature_unit == UnitOfTemperature.FAHRENHEIT else "C"
+
+
+def _to_unit(c_value: float, unit: str) -> float:
+    return round(c_value * 9 / 5 + 32) if unit == "F" else c_value
+
+
+def _from_unit(value: float, unit: str) -> float:
+    return round((value - 32) * 5 / 9, 1) if unit == "F" else value
+
+
 class Eg4SolarReportOptionsFlow(OptionsFlow):
+    """Two steps: report settings and system facts, then temperature thresholds in the chosen unit."""
+
+    def __init__(self) -> None:
+        self._opts: dict[str, Any] = {}
+
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
         if user_input is not None:
-            return self.async_create_entry(data=user_input)
+            self._opts = {**self.config_entry.options, **user_input}
+            return await self.async_step_temperatures()
 
         opts = self.config_entry.options
+        data = self.config_entry.data
         schema: dict[Any, Any] = {
             vol.Required(OPT_WEEKLY_ENABLED, default=opts.get(OPT_WEEKLY_ENABLED, False)): BooleanSelector(),
             vol.Required(OPT_WEEKLY_DAY, default=opts.get(OPT_WEEKLY_DAY, DEFAULT_WEEKLY_DAY)): SelectSelector(
@@ -402,9 +431,34 @@ class Eg4SolarReportOptionsFlow(OptionsFlow):
             )
         )
         schema[vol.Optional(OPT_KNOWN_ISSUES, description={"suggested_value": opts.get(OPT_KNOWN_ISSUES, "")})] = str
+        # System facts found at setup, correctable here
+        schema[vol.Required(CONF_BATTERY_KWH, default=opts.get(CONF_BATTERY_KWH, data.get(CONF_BATTERY_KWH, 0)))] = _number(0, 1000, 0.1, "kWh")
+        schema[vol.Required(CONF_PACK_COUNT, default=opts.get(CONF_PACK_COUNT, data.get(CONF_PACK_COUNT, DEFAULT_PACK_COUNT)))] = _number(1, 64, 1)
+        schema[vol.Required(CONF_PACK_DISCHARGE_A, default=opts.get(CONF_PACK_DISCHARGE_A, data.get(CONF_PACK_DISCHARGE_A, 0)))] = _number(0, 1000, 1, "A")
+        schema[vol.Required(OPT_TEMP_UNIT, default=opts.get(OPT_TEMP_UNIT, _default_unit(self.hass)))] = SelectSelector(
+            SelectSelectorConfig(options=["F", "C"], translation_key="temp_unit", mode=SelectSelectorMode.LIST)
+        )
+        return self.async_show_form(step_id="init", data_schema=vol.Schema(schema))
+
+    async def async_step_temperatures(self, user_input: dict[str, Any] | None = None):
+        """Thresholds shown and entered in the chosen unit; stored in °C."""
+        unit = self._opts.get(OPT_TEMP_UNIT, "C")
+        if user_input is not None:
+            stored = {
+                k: (round(v * 5 / 9, 1) if k == OPT_TEMP_IMBALANCE and unit == "F" else
+                    v if k == OPT_TEMP_IMBALANCE else _from_unit(v, unit))
+                for k, v in user_input.items()
+            }
+            return self.async_create_entry(data={**self._opts, **stored})
+
+        opts = self.config_entry.options
+        sym = "°F" if unit == "F" else "°C"
+        schema: dict[Any, Any] = {}
         for cls, (watch, act) in TEMP_THRESHOLDS.items():
             for level, default in (("watch", watch), ("act", act)):
                 key = f"temp_{cls}_{level}"
-                schema[vol.Required(key, default=opts.get(key, default))] = _number(-20, 150, 1, "°C")
-        schema[vol.Required(OPT_TEMP_IMBALANCE, default=opts.get(OPT_TEMP_IMBALANCE, DEFAULT_TEMP_IMBALANCE))] = _number(0.5, 20, 0.1, "°C")
-        return self.async_show_form(step_id="init", data_schema=vol.Schema(schema))
+                current = _to_unit(opts.get(key, default), unit)
+                schema[vol.Required(key, default=current)] = _number(-20, 300, 1, sym)
+        gap = opts.get(OPT_TEMP_IMBALANCE, DEFAULT_TEMP_IMBALANCE)
+        schema[vol.Required(OPT_TEMP_IMBALANCE, default=round(gap * 9 / 5, 1) if unit == "F" else gap)] = _number(0.5, 40, 0.1, sym)
+        return self.async_show_form(step_id="temperatures", data_schema=vol.Schema(schema))

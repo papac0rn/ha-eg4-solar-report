@@ -378,19 +378,26 @@ def render_cell_voltage(series: dict[str, Any], cell_v_max: float | None) -> byt
     )
 
 
-def render_temperatures(series: dict[str, Any], heatsink_watch: float | None) -> bytes:
+def render_temperatures(series: dict[str, Any], heatsink_watch: float | None, fahrenheit: bool = False) -> bytes:
+    """Heatsinks and battery temperature; series are in °C and drawn in °F when asked."""
+    conv = (lambda v: None if v is None else v * 9 / 5 + 32) if fahrenheit else (lambda v: v)
     keys = [("rad1", "Heatsink 1", ACT), ("rad2", "Heatsink 2", SOUTH), ("rad3", "Heatsink 3", EAST), ("tbat", "Battery", OK)]
-    # A reading that never moves (often a battery sensor that isn't connected) is left off
+    data = dict(series)
+    for k, *_r in keys:
+        data[k] = [conv(v) for v in series.get(k) or []]
+    # A reading that never moves (often an export column that isn't populated) is left off
     lines = [(k, name, color, 1.7, "") for k, name, color in keys
-             if _finite(series.get(k)) and max(_finite(series.get(k))) > min(_finite(series.get(k)))]
-    temps = [v for k, *_r in lines for v in _finite(series.get(k))]
+             if _finite(data.get(k)) and max(_finite(data.get(k))) > min(_finite(data.get(k)))]
+    temps = [v for k, *_r in lines for v in _finite(data.get(k))]
     if not temps:
         return _empty("temperatures")
-    refs = [(heatsink_watch, f"{_fmt(heatsink_watch)} °C heatsink watch", WATCH, "2 4", "end")] if heatsink_watch else []
+    unit = "°F" if fahrenheit else "°C"
+    watch = conv(heatsink_watch) if heatsink_watch else None
+    refs = [(watch, f"{watch:.0f} {unit} heatsink watch", WATCH, "2 4", "end")] if watch else []
     hi = max(temps)
-    if heatsink_watch and heatsink_watch - hi < 15:
-        hi = heatsink_watch
-    return _line_chart("temperatures", series, lines, min(temps) - 2, hi + 3, "°C", refs=refs)
+    if watch and watch - hi < (27 if fahrenheit else 15):
+        hi = watch
+    return _line_chart("temperatures", data, lines, min(temps) - 2, hi + 3, unit, refs=refs)
 
 
 def render_all(series: dict[str, Any] | None, settings: dict[str, Any]) -> dict[str, bytes]:
@@ -402,7 +409,10 @@ def render_all(series: dict[str, Any] | None, settings: dict[str, Any]) -> dict[
         "grid_voltage": render_grid_voltage(series, settings.get("hv_watch"), settings.get("hv_act")),
         "soc": render_soc(series),
         "cell_voltage": render_cell_voltage(series, settings.get("cell_v_max")),
-        "temperatures": render_temperatures(series, settings.get("temp_heatsink_watch") or 95),
+        "temperatures": render_temperatures(
+            series, settings.get("temp_heatsink_watch") or 95,
+            str(settings.get("temp_unit") or "C").upper().startswith("F"),
+        ),
     }
 
 

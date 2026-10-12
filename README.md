@@ -21,13 +21,15 @@ You get a plain verdict (**healthy / watch / act**) plus a list of findings, for
 1. **Account:** server, Monitor Center username and password. These are checked by signing in.
 2. **Station:** chosen automatically if your account has only one.
 3. **System:** which inverters to include, system type (detected), parallel count, GridBOSS.
-4. **Battery:** usable kWh (0 = work it out from the log), pack count, discharge limit per pack, max cell voltage.
+4. **Battery:** found automatically. Size and pack count come from the EG4 Web Monitor integration's battery sensors if
+   you have it, otherwise from the battery itself through the Monitor Center (full Ah × 51.2 V). This screen only appears
+   if neither reports it. The per-pack discharge limit is learned from the log.
 5. **Arrays:** a name per MPPT input, plus the MPPT current limits, max PV voltage and AC output ceiling. These are
    pre-filled for known system types; leave a limit empty or 0 to skip that check.
 6. **Grid and rates:** import rate, export credit, monthly service charge, utility name, nominal grid voltage, and the
    high-voltage Watch/Act thresholds (default 254 / 264 V).
 
-**Configure** (later): weekly report day and time, a report after a grid outage (with a delay so EG4's cloud catches up),
+**Configure** (later): temperature unit (°F or °C, defaulting to your Home Assistant units), temperature thresholds, the battery facts found at setup, weekly report day and time, a report after a grid outage (with a delay so EG4's cloud catches up),
 a notify service with which severities to push, and known issues to report as Info.
 
 ## The 21 checks

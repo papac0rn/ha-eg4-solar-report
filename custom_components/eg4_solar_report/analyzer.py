@@ -277,6 +277,24 @@ def _runs(flags: Sequence[bool]) -> list[tuple[int, int]]:
     return out
 
 
+def _fahrenheit(c: "Ctx") -> bool:
+    return str(c.settings.get("temp_unit") or "C").upper().startswith("F")
+
+
+def _t(c: "Ctx", v: float, unit: bool = True) -> str:
+    """A temperature (stored in °C) in the report's unit."""
+    if _fahrenheit(c):
+        s = f"{v * 9 / 5 + 32:.0f}"
+        return f"{s} °F" if unit else s
+    return f"{v:g} °C" if unit else f"{v:g}"
+
+
+def _dt(c: "Ctx", delta: float, signed: bool = False) -> str:
+    """A temperature difference in the report's unit."""
+    d = delta * 9 / 5 if _fahrenheit(c) else delta
+    return f"{d:+.1f} {'°F' if _fahrenheit(c) else '°C'}" if signed else f"{d:.1f} {'°F' if _fahrenheit(c) else '°C'}"
+
+
 def _bits(code: int) -> list[int]:
     return [b for b in range(32) if code >> b & 1]
 
@@ -580,9 +598,18 @@ def rule_battery_pack_dropout(c: Ctx) -> Check:
     )
 
 
+def _per_pack_limit(c: Ctx, packs: int) -> float:
+    """BMS discharge limit per pack: from setup, or learned as the highest limit seen divided by the pack count."""
+    per = float(c.settings.get("pack_discharge_a") or 0)
+    if not per and packs:
+        seen = _vals(c.log.f("maxDischgCurr"))
+        per = max(seen) / packs if seen else 0.0
+    return per
+
+
 def rule_battery_packs_online(c: Ctx) -> Check:
     packs = int(c.settings.get("pack_count") or 0)
-    per = float(c.settings.get("pack_discharge_a") or 0)
+    per = _per_pack_limit(c, packs)
     limit = c.log.f("maxDischgCurr")
     vals = _vals(limit)
     if not vals:
@@ -695,7 +722,7 @@ def rule_battery_cell_temperature(c: Ctx) -> Check:
     if not hi:
         return Check("battery_cell_temperature", "ok", "No cell temperatures logged")
     top, bottom = max(hi), min(lo) if lo else min(hi)
-    result = f"Cells {bottom:g}-{top:g} °C"
+    result = f"Cells {_t(c, bottom, unit=False)}-{_t(c, top)}"
     charging_cold = any((t or 99) < 0 and (p or 0) > 0 for t, p in zip(c.log.f("MinCellTemp"), c.log.f("pCharge")))
     watch, act = _temp_limits(c, "cell")
     if top > act:
@@ -705,8 +732,8 @@ def rule_battery_cell_temperature(c: Ctx) -> Check:
     else:
         return Check("battery_cell_temperature", "ok", result)
     return Check("battery_cell_temperature", sev, result,
-                 title="Battery charged below freezing" if charging_cold and top <= watch else f"Cells reached {top:g} °C",
-                 detail=f"Cell temperatures ranged {bottom:g}-{top:g} °C.",
+                 title="Battery charged below freezing" if charging_cold and top <= watch else f"Cells reached {_t(c, top)}",
+                 detail=f"Cell temperatures ranged {_t(c, bottom, unit=False)}-{_t(c, top)}.",
                  action="Improve airflow around the battery, or check the BMS low-temperature charge limit.")
 
 
@@ -881,14 +908,14 @@ def rule_inverter_heatsink(c: Ctx) -> Check:
     peaks = {k: _max_at(log.t, v) for k, v in rads.items()}
     k_hot = max(peaks, key=lambda k: peaks[k][0] if peaks[k][0] is not None else -99)
     peak, peak_t, peak_i = peaks[k_hot]
-    facts = [(f"Heatsink {k}", f"peak {p[0]:g} °C at {_hm(p[1])}") for k, p in peaks.items() if p[0] is not None]
+    facts = [(f"Heatsink {k}", f"peak {_t(c, p[0])} at {_hm(p[1])}") for k, p in peaks.items() if p[0] is not None]
     gap = radiator_gap(c)
     limit = float(c.settings.get("temp_imbalance") or DEFAULT_IMBALANCE_C)
     if gap is not None:
-        facts.append(("Heatsink 1 vs others, PV off", f"{gap:+.1f} °C"))
+        facts.append(("Heatsink 1 vs others, PV off", _dt(c, gap, signed=True)))
     watch, act = _temp_limits(c, "heatsink")
     imbalance = gap is not None and gap >= limit
-    result = f"Peak {peak:g} °C (heatsink {k_hot})" + (f"; heatsink 1 runs {gap:+.1f} °C at idle" if imbalance else "")
+    result = f"Peak {_t(c, peak)} (heatsink {k_hot})" + (f"; heatsink 1 runs {_dt(c, gap, signed=True)} at idle" if imbalance else "")
     if peak >= act:
         sev = "act"
     elif peak >= watch or imbalance:
@@ -896,10 +923,10 @@ def rule_inverter_heatsink(c: Ctx) -> Check:
     else:
         return Check("inverter_heatsink", "ok", result, facts=facts)
     charge = log.kw("pCharge")[peak_i] if peak_i is not None else None
-    detail = (f"Heatsink {k_hot} peaked at {peak:g} °C on {_day(peak_t)} at {_hm(peak_t)}"
+    detail = (f"Heatsink {k_hot} peaked at {_t(c, peak)} on {_day(peak_t)} at {_hm(peak_t)}"
               + (f" with the battery charging at {charge:.1f} kW" if charge else "") + ".")
     if imbalance:
-        detail += (f" Overnight, with no PV flowing, heatsink 1 still sits {gap:.1f} °C above heatsinks 2 and 3. That "
+        detail += (f" Overnight, with no PV flowing, heatsink 1 still sits {_dt(c, gap)} above heatsinks 2 and 3. That "
                    "is not load, so it points to airflow or a fan on heatsink 1.")
     hot = peak >= watch
     return Check(
@@ -1161,17 +1188,19 @@ def temperatures(c: Ctx) -> list[dict[str, Any]]:
         status = "act" if top >= act else "watch" if top >= watch else "ok"
         note = ""
         if len(v) > 50 and min(v) == top:
-            note = f"the export reads {top:g} °C the whole period, so this column may not carry the live reading"
+            note = f"the export reads {_t(c, top)} the whole period, so this column may not carry the live reading"
         if cls == "cell" and min(v) < 0:
             status, note = "act", "below freezing; the BMS limits charging"
         if col == "tradiator1" and gap is not None:
-            note = f"{gap:+.1f} °C vs heatsinks 2/3 overnight with no PV"
+            note = f"{_dt(c, gap, signed=True)} vs heatsinks 2/3 overnight with no PV"
             if gap >= imbalance and status == "ok":
                 status = "watch"
                 note += ": airflow/fan"
+        conv = (lambda x: round(x * 9 / 5 + 32, 1)) if _fahrenheit(c) else (lambda x: x)
         rows.append({
-            "sensor": name, "column": col, "min": min(v), "max": top, "typical": round(statistics.median(v), 1),
-            "max_at": top_t.isoformat(), "watch": watch, "act": act, "status": status, "note": note,
+            "sensor": name, "column": col, "unit": "°F" if _fahrenheit(c) else "°C",
+            "min": conv(min(v)), "max": conv(top), "typical": conv(round(statistics.median(v), 1)),
+            "max_at": top_t.isoformat(), "watch": conv(watch), "act": conv(act), "status": status, "note": note,
         })
     return rows
 
@@ -1226,7 +1255,7 @@ def alarms(c: Ctx, checks: Sequence[Check], occ: dict[str, list[dict[str, Any]]]
                     max((x["verdict"] for x in b), key=SEVERITY_ORDER.get, default="ok"),
                     "; ".join(f"{x['name']} ×{x['count']}" for x in b) if b else "none"))
     packs = int(c.settings.get("pack_count") or 0)
-    per = float(c.settings.get("pack_discharge_a") or 0)
+    per = _per_pack_limit(c, packs)
     limit = c.log.f("maxDischgCurr")
     lows = [i for i, v in enumerate(limit) if v is not None and packs and per and v < packs * per * 0.97]
     if packs and per:
@@ -1340,7 +1369,7 @@ def _stats(c: Ctx) -> list[dict[str, str]]:
     if best_r and best_r[0][0] is not None:
         (val, when, idx), _k = best_r
         charge = log.kw("pCharge")[idx]
-        stats.append({"label": "Heatsink max", "value": f"{val:g} °C",
+        stats.append({"label": "Heatsink max", "value": _t(c, val),
                       "sub": f"{_day(when)}" + (f", {charge:.0f} kW battery charge" if charge and charge >= 1 else "")})
     return stats
 
@@ -1488,6 +1517,7 @@ def build_report(
         "interval_min": round(log.interval, 1),
         "array_names": c.array_names,
         "array_labels": mppt_labels(c),
+        "temp_unit": "°F" if _fahrenheit(c) else "°C",
         "temperatures": temperatures(c),
         "alarms": alarm_rows,
         "codes": occ["fault"] + occ["warning"] + occ["bms"],

@@ -73,6 +73,7 @@ TEMP_THRESHOLDS = {
     "cell": (45, 55),
 }
 OPT_TEMP_IMBALANCE = "temp_imbalance"
+OPT_TEMP_UNIT = "temp_unit"  # "F" or "C"; defaults to the Home Assistant unit system
 DEFAULT_TEMP_IMBALANCE = 3.0
 
 WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]

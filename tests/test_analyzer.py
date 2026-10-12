@@ -230,3 +230,23 @@ def test_dropout_alarm_row(dropout_report):
     row = next(a for a in dropout_report["alarms"] if a["alarm"].startswith("Packs"))
     assert row["alarm"] == "Packs (1 pack out)"
     assert row["verdict"] == "act"
+
+def test_fahrenheit_report():
+    content = (FIXTURES / "day-2026-09-26.xls").read_bytes()
+    r = analyzer.build_report({"anon": [content]}, {**SETTINGS, "temp_unit": "F"}, DAY, DAY)
+    assert r["temp_unit"] == "°F"
+    temps = {t["sensor"]: t for t in r["temperatures"]}
+    assert temps["Heatsink 1"]["max"] == pytest.approx(163.4)
+    assert temps["Heatsink 1"]["unit"] == "°F"
+    assert temps["Heatsink 1"]["watch"] == pytest.approx(203)
+    facts = dict(_finding(r, "inverter_heatsink")["facts"])
+    assert facts["Heatsink 1"] == "peak 163 °F at 12:13"
+    assert facts["Heatsink 1 vs others, PV off"].endswith("°F")
+    assert next(s for s in r["stats"] if s["label"] == "Heatsink max")["value"] == "163 °F"
+    assert b"\xc2\xb0F" in charts.render_all(r["_chart_series"], {**SETTINGS, "temp_unit": "F"})["temperatures"]
+
+
+def test_per_pack_limit_is_learned_when_not_set():
+    content = (FIXTURES / "pack-dropout-2026-08-24_27.xls").read_bytes()
+    r = analyzer.build_report({"anon": [content]}, {**SETTINGS, "pack_discharge_a": 0}, date(2026, 8, 24), date(2026, 8, 27))
+    assert _finding(r, "battery_packs_online")["title"] == "Battery pack offline: 3 of 4 packs"

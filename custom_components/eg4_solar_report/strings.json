@@ -36,7 +36,7 @@
         },
         "data_description": {
           "battery_kwh": "Enter 0 to work it out from the log.",
-          "pack_discharge_a": "The BMS discharge limit drops when a pack goes offline, so this is how missing packs are spotted.",
+          "pack_discharge_a": "0 learns it from the log. A pack offline lowers this limit, which is how missing packs are spotted.",
           "cell_v_max": "3.65 V for LiFePO4 cells."
         }
       },
@@ -107,6 +107,26 @@
           "notify_service": "Notify service",
           "notify_severities": "Push these severities",
           "known_issues": "Known issues",
+          "battery_kwh": "Usable battery capacity",
+          "pack_count": "Number of battery packs",
+          "pack_discharge_a": "Discharge limit per pack",
+          "temp_unit": "Temperature unit"
+        },
+        "data_description": {
+          "weekly_day": "The weekly report covers the 7 days ending on this day.",
+          "outage_entity": "A binary sensor that is on while the system is off-grid.",
+          "outage_delay_minutes": "Gives the EG4 cloud time to catch up before the report runs.",
+          "notify_service": "For example notify.mobile_app_my_phone. Leave empty for no pushes.",
+          "known_issues": "Comma-separated finding IDs to report as Info instead of Watch or Act.",
+          "battery_kwh": "Found at setup from the EG4 integration or the battery itself. 0 works it out from the log.",
+          "pack_discharge_a": "0 learns it from the log (the highest limit seen, divided by the pack count).",
+          "temp_unit": "Used for every temperature in the report and its chart."
+        }
+      },
+      "temperatures": {
+        "title": "Temperature thresholds",
+        "description": "In the unit you picked. Watch shows in the report only; Act can push if you chose Act notifications.",
+        "data": {
           "temp_heatsink_watch": "Heatsink Watch at",
           "temp_heatsink_act": "Heatsink Act at",
           "temp_internal_watch": "Inverter internal Watch at",
@@ -118,11 +138,6 @@
           "temp_imbalance": "Heatsink 1 overnight imbalance Watch at"
         },
         "data_description": {
-          "weekly_day": "The weekly report covers the 7 days ending on this day.",
-          "outage_entity": "A binary sensor that is on while the system is off-grid.",
-          "outage_delay_minutes": "Gives the EG4 cloud time to catch up before the report runs.",
-          "notify_service": "For example notify.mobile_app_my_phone. Leave empty for no pushes.",
-          "known_issues": "Comma-separated finding IDs to report as Info instead of Watch or Act.",
           "temp_heatsink_watch": "A normal summer peak can reach about 93 °C, so the default leaves room above it.",
           "temp_imbalance": "How much warmer heatsink 1 may sit than heatsinks 2 and 3 overnight, with no PV, before it points to airflow or a fan."
         }
@@ -153,6 +168,12 @@
         "act": "Act",
         "watch": "Watch",
         "info": "Info"
+      }
+    },
+    "temp_unit": {
+      "options": {
+        "F": "Fahrenheit (°F)",
+        "C": "Celsius (°C)"
       }
     }
   },

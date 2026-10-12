@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Callable
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_OFF, STATE_ON
+from homeassistant.const import STATE_OFF, STATE_ON, UnitOfTemperature
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.helpers.event import (
@@ -58,6 +58,7 @@ from .const import (
     PERIOD_TODAY,
     TEMP_THRESHOLDS,
     OPT_TEMP_IMBALANCE,
+    OPT_TEMP_UNIT,
     SERVERS,
     SEVERITY_ACT,
     VERDICT_ERROR,
@@ -178,10 +179,10 @@ class ReportManager:
             "system_type": data.get(CONF_SYSTEM_TYPE),
             "parallel_count": int(data.get(CONF_PARALLEL_COUNT, 1)),
             "gridboss": data.get(CONF_GRIDBOSS, False),
-            "battery_kwh": data.get(CONF_BATTERY_KWH),
-            "pack_count": int(data.get(CONF_PACK_COUNT, 0)),
-            "pack_discharge_a": data.get(CONF_PACK_DISCHARGE_A),
-            "cell_v_max": data.get(CONF_CELL_V_MAX),
+            "battery_kwh": opts.get(CONF_BATTERY_KWH) or data.get(CONF_BATTERY_KWH),
+            "pack_count": int(opts.get(CONF_PACK_COUNT) or data.get(CONF_PACK_COUNT, 0)),
+            "pack_discharge_a": opts.get(CONF_PACK_DISCHARGE_A) or data.get(CONF_PACK_DISCHARGE_A),
+            "cell_v_max": opts.get(CONF_CELL_V_MAX) or data.get(CONF_CELL_V_MAX),
             "array_names": names,
             "mppt_limits_a": limits,
             "pv_max_v": data.get(CONF_PV_MAX_V) or None,
@@ -197,6 +198,8 @@ class ReportManager:
             # From the EG4 Web Monitor integration when installed; otherwise the analyzer infers it
             "soc_floor": ha_eg4.soc_floor(self.hass, data[CONF_INVERTERS][0]),
             "temp_imbalance": opts.get(OPT_TEMP_IMBALANCE),
+            "temp_unit": opts.get(OPT_TEMP_UNIT)
+            or ("F" if self.hass.config.units.temperature_unit == UnitOfTemperature.FAHRENHEIT else "C"),
             **{
                 f"temp_{cls}_{level}": opts.get(f"temp_{cls}_{level}")
                 for cls in TEMP_THRESHOLDS
