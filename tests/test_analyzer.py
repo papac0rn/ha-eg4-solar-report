@@ -1,22 +1,18 @@
-"""Analyzer tests. Loads analyzer.py by path so Home Assistant isn't needed.
+"""Analyzer tests (loaded through conftest's eg4sr package, so Home Assistant isn't needed).
 
 The day fixture is a real Monitor Center export with the serial removed. The expected values come from the
 prototype's published review of that same day.
 """
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 from datetime import date
 from pathlib import Path
 
 import pytest
 
-_PATH = Path(__file__).parents[1] / "custom_components" / "eg4_solar_report" / "analyzer.py"
-_spec = importlib.util.spec_from_file_location("eg4_analyzer", _PATH)
-analyzer = importlib.util.module_from_spec(_spec)
-sys.modules[_spec.name] = analyzer  # dataclasses need the module registered
-_spec.loader.exec_module(analyzer)
+analyzer = importlib.import_module("eg4sr.analyzer")
+charts = importlib.import_module("eg4sr.charts")
 
 Check = analyzer.Check
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -133,11 +129,6 @@ def test_day_heatsink_imbalance_matches_answer_key(day_report):
 
 
 def test_charts_render_from_the_day(day_report):
-    charts_path = _PATH.with_name("charts.py")
-    spec = importlib.util.spec_from_file_location("eg4_charts_day", charts_path)
-    charts = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = charts
-    spec.loader.exec_module(charts)
     rendered = charts.render_all(day_report["_chart_series"], SETTINGS)
     for name, data in rendered.items():
         assert b"No data" not in data, name
@@ -175,3 +166,67 @@ def test_multi_day_table(dropout_report):
     assert dropout_report["daily"][0]["pv"] == pytest.approx(135.7, abs=0.05)
     assert dropout_report["totals"]["pv"] == pytest.approx(135.7 + 139.1 + 97.4 + 121.7, abs=0.2)
     assert _check(dropout_report, "data_counter_crosscheck")["status"] == "ok"
+
+def _ctx_with_codes(warnings: dict[int, int]) -> object:
+    """The real day with warning codes injected at sample indexes."""
+    _header, rows = analyzer.parse_export((FIXTURES / "day-2026-09-26.xls").read_bytes())
+    for i, code in warnings.items():
+        rows[i]["warningCode"] = f"0x{code:X}"
+    log = analyzer.Log(rows)
+    return analyzer._build_ctx(log, SETTINGS, DAY, DAY)
+
+
+def test_code_judgement_transient_persistent_unknown():
+    ctx = _ctx_with_codes({
+        100: 1 << 17,                                  # W017 once, 1 sample: transient
+        **{i: 1 << 27 for i in range(150, 160)},        # W027 for 40 min: persistent
+        200: 1 << 19,                                   # bit 19 is not in the table
+    })
+    occ = {o["code"]: o for o in analyzer.code_occurrences(ctx, "warning")}
+    assert occ["W017"]["classification"] == "transient"
+    assert occ["W017"]["verdict"] in ("ok", "info")
+    assert occ["W027"]["classification"] == "persistent"
+    assert occ["W027"]["verdict"] == "act"
+    assert occ["W027"]["name"] == "Battery open circuit"
+    assert occ["W019"]["verdict"] == "watch"
+    assert occ["W019"]["name"].startswith("Unknown code W019")
+
+
+def test_transient_with_voltage_excursion_is_ok():
+    # Sample near the 14:46 peak (259.9 V is within 2 V of nothing, so use a low hv_act to make it an excursion)
+    ctx = _ctx_with_codes({200: 1 << 17})
+    ctx.hv_act = 255
+    occ = analyzer.code_occurrences(ctx, "warning")
+    assert occ[0]["verdict"] == "ok"
+    assert "cleared on its own" in occ[0]["why"]
+
+
+def test_panels(day_report):
+    temps = {t["sensor"]: t for t in day_report["temperatures"]}
+    assert temps["Heatsink 1"]["max"] == 73
+    assert temps["Heatsink 1"]["status"] == "watch"
+    assert "airflow/fan" in temps["Heatsink 1"]["note"]
+    alarms = {a["alarm"].split(" (")[0]: a for a in day_report["alarms"]}
+    assert alarms["Fault codes"]["count"] == 0 and alarms["Fault codes"]["verdict"] == "ok"
+    assert alarms["Packs"]["verdict"] == "ok"
+    assert any(a["alarm"] == "Packs (4/4 online)" for a in day_report["alarms"])
+    assert alarms["Over-voltage hours"]["verdict"] == "watch"
+    assert day_report["array_labels"] == ["MPPT1 · South", "MPPT2 · East", "MPPT3 · West"]
+    south = day_report["mppt"][0]
+    assert south["kwh"] == 60.3 and south["limit_a"] == 26
+    assert day_report["stats"][1]["label"] == "MPPT1 · South"
+    # The headline chips come from the alarm panel
+    chips = {c["label"]: c["status"] for c in day_report["chips"]}
+    assert chips["Fault codes 0"] == "ok" and chips["Grid outages 0"] == "ok"
+
+
+def test_heatsink_imbalance_is_watch(day_report):
+    f = _finding(day_report, "inverter_heatsink")
+    assert f["severity"] == "watch"
+    assert f["title"] == "Airflow/fan on heatsink 1"
+
+
+def test_dropout_alarm_row(dropout_report):
+    row = next(a for a in dropout_report["alarms"] if a["alarm"].startswith("Packs"))
+    assert row["alarm"] == "Packs (1 pack out)"
+    assert row["verdict"] == "act"

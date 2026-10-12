@@ -10,6 +10,7 @@ Input is the report's `series` dict:
 - bars: {"cats": ["Oct 1", ...], "arrays": [{"name": "South", "values": [kWh per day]}, ...],
          "load": [...], "export": [...], "import": [...]}
 - soc_floor: the battery's discharge floor in %, if known
+- rad1, rad2, rad3: heatsink °C; tbat: battery °C
 - notes: {chart key: [{"t": hours or "day": index, "v": value, "text": str}]}, written by the analyzer
 """
 from __future__ import annotations
@@ -43,7 +44,7 @@ ARRAY_COLORS = [SOUTH, EAST, WEST, INFO, OK, ACT]
 MONO = "ui-monospace, 'SF Mono', 'Cascadia Mono', 'JetBrains Mono', Menlo, Consolas, 'Liberation Mono', monospace"
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
-CHARTS = ("harvest", "energy", "pv_ac", "grid_voltage", "soc", "cell_voltage")
+CHARTS = ("harvest", "energy", "pv_ac", "grid_voltage", "soc", "cell_voltage", "temperatures")
 TITLES = {
     "harvest": "Harvest by array",
     "energy": "Load, export, import",
@@ -51,6 +52,7 @@ TITLES = {
     "grid_voltage": "Line voltage",
     "soc": "State of charge",
     "cell_voltage": "Cell voltage, highest and lowest",
+    "temperatures": "Temperatures",
 }
 
 
@@ -376,6 +378,21 @@ def render_cell_voltage(series: dict[str, Any], cell_v_max: float | None) -> byt
     )
 
 
+def render_temperatures(series: dict[str, Any], heatsink_watch: float | None) -> bytes:
+    keys = [("rad1", "Heatsink 1", ACT), ("rad2", "Heatsink 2", SOUTH), ("rad3", "Heatsink 3", EAST), ("tbat", "Battery", OK)]
+    # A reading that never moves (often a battery sensor that isn't connected) is left off
+    lines = [(k, name, color, 1.7, "") for k, name, color in keys
+             if _finite(series.get(k)) and max(_finite(series.get(k))) > min(_finite(series.get(k)))]
+    temps = [v for k, *_r in lines for v in _finite(series.get(k))]
+    if not temps:
+        return _empty("temperatures")
+    refs = [(heatsink_watch, f"{_fmt(heatsink_watch)} °C heatsink watch", WATCH, "2 4", "end")] if heatsink_watch else []
+    hi = max(temps)
+    if heatsink_watch and heatsink_watch - hi < 15:
+        hi = heatsink_watch
+    return _line_chart("temperatures", series, lines, min(temps) - 2, hi + 3, "°C", refs=refs)
+
+
 def render_all(series: dict[str, Any] | None, settings: dict[str, Any]) -> dict[str, bytes]:
     series = series or {}
     return {
@@ -385,6 +402,7 @@ def render_all(series: dict[str, Any] | None, settings: dict[str, Any]) -> dict[
         "grid_voltage": render_grid_voltage(series, settings.get("hv_watch"), settings.get("hv_act")),
         "soc": render_soc(series),
         "cell_voltage": render_cell_voltage(series, settings.get("cell_v_max")),
+        "temperatures": render_temperatures(series, settings.get("temp_heatsink_watch") or 95),
     }
 
 

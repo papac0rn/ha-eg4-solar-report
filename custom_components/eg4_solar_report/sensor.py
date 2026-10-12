@@ -28,7 +28,10 @@ class ReportSensor(ReportEntity, SensorEntity):
     _attr_options = [VERDICT_HEALTHY, VERDICT_WATCH, VERDICT_ACT, VERDICT_ERROR]
     # Keep the big attributes out of the recorder database
     _unrecorded_attributes = frozenset(
-        {"detail", "chips", "stats", "daily", "totals", "findings", "checks", "actions", "series", "array_names"}
+        {
+            "detail", "chips", "stats", "daily", "totals", "findings", "checks", "actions", "series",
+            "array_names", "array_labels", "alarms", "temperatures", "mppt", "codes",
+        }
     )
 
     def __init__(self, manager: ReportManager, entry: ConfigEntry) -> None:
@@ -63,6 +66,11 @@ class ReportSensor(ReportEntity, SensorEntity):
             "samples": report.get("samples"),
             "interval_min": report.get("interval_min"),
             "array_names": report.get("array_names"),
+            "array_labels": report.get("array_labels"),
+            "alarms": report.get("alarms", []),
+            "temperatures": report.get("temperatures", []),
+            "mppt": report.get("mppt", []),
+            "codes": report.get("codes", []),
             "counts": report.get("counts"),
             "chips": report.get("chips", []),
             "stats": report.get("stats", []),

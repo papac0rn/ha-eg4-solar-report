@@ -17,6 +17,7 @@ CHART_NAMES = {
     "grid_voltage": "Chart Grid Voltage",
     "soc": "Chart SOC",
     "cell_voltage": "Chart Cell Voltage",
+    "temperatures": "Chart Temperatures",
 }
 
 

@@ -22,6 +22,9 @@ from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any, Callable, Sequence
 
+from . import codes
+from .const import DEFAULT_TEMP_IMBALANCE, TEMP_THRESHOLDS
+
 SEVERITY_ORDER = {"ok": 0, "info": 1, "watch": 2, "act": 3}
 
 # id, group, check name: the "All checks" table, in report order
@@ -694,14 +697,15 @@ def rule_battery_cell_temperature(c: Ctx) -> Check:
     top, bottom = max(hi), min(lo) if lo else min(hi)
     result = f"Cells {bottom:g}-{top:g} °C"
     charging_cold = any((t or 99) < 0 and (p or 0) > 0 for t, p in zip(c.log.f("MinCellTemp"), c.log.f("pCharge")))
-    if top > 55:
+    watch, act = _temp_limits(c, "cell")
+    if top > act:
         sev = "act"
-    elif top > 45 or charging_cold:
+    elif top > watch or charging_cold:
         sev = "watch"
     else:
         return Check("battery_cell_temperature", "ok", result)
     return Check("battery_cell_temperature", sev, result,
-                 title="Battery charged below freezing" if charging_cold and top <= 45 else f"Cells reached {top:g} °C",
+                 title="Battery charged below freezing" if charging_cold and top <= watch else f"Cells reached {top:g} °C",
                  detail=f"Cell temperatures ranged {bottom:g}-{top:g} °C.",
                  action="Improve airflow around the battery, or check the BMS low-temperature charge limit.")
 
@@ -760,28 +764,113 @@ def rule_battery_grid_carrying_load(c: Ctx) -> Check:
     )
 
 
+def _context(c: Ctx, a: int, b: int) -> str | None:
+    """What else was happening around samples a..b: a grid event, a voltage excursion or a sunrise mode change."""
+    lo, hi = max(a - 2, 0), min(b + 2, len(c.log) - 1)
+    if any(not c.grid_ok[i] for i in range(lo, hi + 1)):
+        return "a grid event"
+    volts = [c.log.f("vacr")[i] for i in range(lo, hi + 1)]
+    if any(v is not None and (v >= c.hv_act - 2 or v < 0.9 * c.nominal_v) for v in volts):
+        return "a grid voltage excursion"
+    status = c.log.text("Status")
+    pv = c.pv_kw
+    for i in range(max(lo, 1), hi + 1):
+        if status[i] != status[i - 1] and 4 <= c.log.t[i].hour <= 10 and (pv[i] or 0) > (pv[i - 1] or 0):
+            return "the sunrise mode change"
+    return None
+
+
+def code_occurrences(c: Ctx, kind: str) -> list[dict[str, Any]]:
+    """Decode every fault or warning bit seen, and judge each one transient or persistent, with the reason."""
+    col = "warningCode" if kind == "warning" else "faultCode"
+    values = c.log.codes(col)
+    out = []
+    for bit in sorted({b for v in values if v for b in _bits(v)}):
+        runs = _runs([bool(v >> bit & 1) for v in values])
+        minutes = [(c.log.t[b] - c.log.t[a]).total_seconds() / 60 + c.log.interval for a, b in runs]
+        contexts = [_context(c, a, b) for a, b in runs]
+        info = codes.lookup(kind, bit)
+        label = codes.label(kind, bit)
+        transient = len(runs) <= 2 and max(minutes) <= 10
+        persistent = len(runs) >= 3 or max(minutes) > 30
+        context = next((x for x in contexts if x), None)
+        if info is None:
+            verdict = "watch"
+            why = f"Unknown code {label} (bit {bit}, 0x{1 << bit:08X}), not in the table."
+        elif transient and context:
+            verdict = "ok"
+            why = f"{label} for {_hours(sum(minutes))} during {context}, cleared on its own."
+        elif transient:
+            verdict = "info"
+            why = f"{label} for {_hours(sum(minutes))}, cleared on its own with no grid event around it."
+        elif persistent:
+            verdict = info.severity
+            why = (f"{label} {len(runs)} times this {'week' if len(c.days) >= 6 else 'period'}" if len(runs) >= 3
+                   else f"{label} lasted {_hours(max(minutes))}") + ", so it is not a one-off."
+        else:
+            verdict = "info" if info.severity == "watch" else "watch"
+            why = f"{label} {len(runs)} time(s), up to {_hours(max(minutes))}."
+        first, last = c.log.t[runs[0][0]], c.log.t[runs[-1][1]]
+        out.append({
+            "code": label, "kind": kind, "bit": bit,
+            "name": info.name if info else f"Unknown code {label}",
+            "meaning": info.meaning if info else "Not in the code table.",
+            "causes": info.causes if info else "",
+            "action": info.action if info else "Note the time and ask EG4 support what this code means.",
+            "source": info.source if info else "unknown",
+            "count": len(runs), "minutes": round(sum(minutes)),
+            "first": first.isoformat(), "last": last.isoformat(),
+            "classification": "transient" if transient else "persistent" if persistent else "recurring",
+            "verdict": verdict, "why": why,
+        })
+    return out
+
+
+def _code_check(c: Ctx, check_id: str, kind: str) -> Check:
+    occ = code_occurrences(c, kind)
+    word = "warning" if kind == "warning" else "fault"
+    if not occ:
+        return Check(check_id, "ok", f"Every {word} code 0x0")
+    worst = max(occ, key=lambda o: SEVERITY_ORDER[o["verdict"]])
+    result = "; ".join(f"{o['code']} ×{o['count']} {o['classification']}" for o in occ)
+    if worst["verdict"] == "ok":
+        return Check(check_id, "ok", result, facts=[(o["code"], o["why"]) for o in occ])
+    return Check(
+        check_id, worst["verdict"], result,
+        title=f"{worst['code']} {worst['name']}" if len(occ) == 1 else f"{len(occ)} {word} codes, worst {worst['code']}",
+        detail=" ".join(f"{o['code']} {o['name']}: {o['why']} {o['meaning']}" for o in occ),
+        action=worst["action"],
+        facts=[(o["code"], f"{o['name']} · {o['count']}× · {_hours(o['minutes'])} · {o['verdict']}") for o in occ],
+    )
+
+
 def rule_inverter_faults(c: Ctx) -> Check:
-    codes = [x for x in c.log.codes("faultCode") if x]
-    if not codes:
-        return Check("inverter_faults", "ok", "Every fault code 0x0")
-    bits = sorted({b for x in codes for b in _bits(x)})
-    names = ", ".join(f"E{b:03d}" for b in bits)
-    return Check("inverter_faults", "act", f"{len(codes)} sample(s) with faults: {names}",
-                 title=f"Inverter fault codes {names}",
-                 detail=f"The inverter logged fault code(s) {names} in {len(codes)} sample(s).",
-                 action="Look up the codes in the EG4 manual and contact EG4 support with the times.")
+    return _code_check(c, "inverter_faults", "fault")
 
 
 def rule_inverter_warnings(c: Ctx) -> Check:
-    codes = [x for x in c.log.codes("warningCode") if x]
-    if not codes:
-        return Check("inverter_warnings", "ok", "Every warning code 0x0")
-    bits = sorted({b for x in codes for b in _bits(x)})
-    names = ", ".join(f"W{b:03d}" for b in bits)
-    return Check("inverter_warnings", "watch", f"{len(codes)} sample(s) with warnings: {names}",
-                 title=f"Inverter warning codes {names}",
-                 detail=f"The inverter logged warning code(s) {names} in {len(codes)} sample(s).",
-                 action="Look up the codes in the EG4 manual; repeated warnings are worth a ticket with EG4.")
+    return _code_check(c, "inverter_warnings", "warning")
+
+
+TEMP_DEFAULTS = TEMP_THRESHOLDS
+DEFAULT_IMBALANCE_C = DEFAULT_TEMP_IMBALANCE
+
+
+def _temp_limits(c: Ctx, cls: str) -> tuple[float, float]:
+    watch, act = TEMP_DEFAULTS[cls]
+    return float(c.settings.get(f"temp_{cls}_watch") or watch), float(c.settings.get(f"temp_{cls}_act") or act)
+
+
+def radiator_gap(c: Ctx) -> float | None:
+    """Heatsink 1's overnight baseline minus heatsinks 2 and 3, with no PV flowing (so not a load effect)."""
+    log = c.log
+    rads = {k: log.f(f"tradiator{k}") for k in (1, 2, 3) if log.has(f"tradiator{k}")}
+    night = [i for i, p in enumerate(c.pv_kw) if p is not None and p < 0.02]
+    if 1 not in rads or len(rads) < 2 or len(night) < 10:
+        return None
+    r1 = statistics.fmean(_vals(rads[1][i] for i in night))
+    others = [statistics.fmean(_vals(rads[k][i] for i in night)) for k in rads if k != 1]
+    return r1 - statistics.fmean(others)
 
 
 def rule_inverter_heatsink(c: Ctx) -> Check:
@@ -793,36 +882,33 @@ def rule_inverter_heatsink(c: Ctx) -> Check:
     k_hot = max(peaks, key=lambda k: peaks[k][0] if peaks[k][0] is not None else -99)
     peak, peak_t, peak_i = peaks[k_hot]
     facts = [(f"Heatsink {k}", f"peak {p[0]:g} °C at {_hm(p[1])}") for k, p in peaks.items() if p[0] is not None]
-    # Overnight baseline: PV off, so the inverter is idling or running off the battery
-    night = [i for i, p in enumerate(c.pv_kw) if p is not None and p < 0.02]
-    gap = None
-    if 1 in rads and len(rads) > 1 and len(night) >= 10:
-        r1 = statistics.fmean(_vals(rads[1][i] for i in night))
-        others = [statistics.fmean(_vals(rads[k][i] for i in night)) for k in rads if k != 1]
-        gap = r1 - statistics.fmean(others)
+    gap = radiator_gap(c)
+    limit = float(c.settings.get("temp_imbalance") or DEFAULT_IMBALANCE_C)
+    if gap is not None:
         facts.append(("Heatsink 1 vs others, PV off", f"{gap:+.1f} °C"))
-    result = f"Peak {peak:g} °C (heatsink {k_hot})"
-    if peak >= 100:
+    watch, act = _temp_limits(c, "heatsink")
+    imbalance = gap is not None and gap >= limit
+    result = f"Peak {peak:g} °C (heatsink {k_hot})" + (f"; heatsink 1 runs {gap:+.1f} °C at idle" if imbalance else "")
+    if peak >= act:
         sev = "act"
-    elif peak >= 90:
+    elif peak >= watch or imbalance:
         sev = "watch"
-    elif gap is not None and gap >= 3:
-        sev = "info"
     else:
         return Check("inverter_heatsink", "ok", result, facts=facts)
     charge = log.kw("pCharge")[peak_i] if peak_i is not None else None
     detail = (f"Heatsink {k_hot} peaked at {peak:g} °C on {_day(peak_t)} at {_hm(peak_t)}"
               + (f" with the battery charging at {charge:.1f} kW" if charge else "") + ".")
-    if gap is not None and gap >= 3:
-        detail += (f" With PV off, heatsink 1 still runs {gap:.1f} °C warmer than the others, which points to airflow "
-                   "or a fan on that side rather than load.")
+    if imbalance:
+        detail += (f" Overnight, with no PV flowing, heatsink 1 still sits {gap:.1f} °C above heatsinks 2 and 3. That "
+                   "is not load, so it points to airflow or a fan on heatsink 1.")
+    hot = peak >= watch
     return Check(
-        "inverter_heatsink", sev, result + (f"; heatsink 1 runs {gap:+.1f} °C at idle" if gap and gap >= 3 else ""),
-        title=f"Heatsink {k_hot} runs hot" if sev != "info" else "Heatsink 1 runs warmer than the others",
+        "inverter_heatsink", sev, result,
+        title=f"Heatsink {k_hot} runs hot" if hot else "Airflow/fan on heatsink 1",
         detail=detail, facts=facts,
-        action="Check the inverter's fans and clear its air path; compare after cleaning.",
+        action="Check the fan on heatsink 1's side and clear its air path, then compare the overnight gap in the next report."
+        if imbalance and not hot else "Check the inverter's fans and clear its air path.",
     )
-
 
 def rule_inverter_output_ceiling(c: Ctx) -> Check:
     ceiling = c.settings.get("output_ceiling_kw")
@@ -859,25 +945,25 @@ def _mppt_currents(c: Ctx) -> list[list[float | None]]:
 def rule_inverter_mppt_current(c: Ctx) -> Check:
     limits = list(c.settings.get("mppt_limits_a") or [])
     currents = _mppt_currents(c)
-    facts, worst = [], 0.0
+    facts, worst, hit = [], 0.0, "A string"
     for k, (name, cur) in enumerate(zip(c.array_names, currents)):
         top, top_t, _i = _max_at(c.log.t, cur)
         if top is None:
             continue
         lim = limits[k] if k < len(limits) else None
-        facts.append((f"{name} (MPPT{k + 1})", f"max {top:.1f} A" + (f" of {lim:g} A" if lim else "")))
-        if lim:
-            worst = max(worst, top / lim)
+        facts.append((f"MPPT{k + 1} · {name}", f"max {top:.1f} A" + (f" of {lim:g} A" if lim else "")))
+        if lim and top / lim > worst:
+            worst, hit = top / lim, f"MPPT{k + 1} · {name}"
     if not limits:
         return Check("inverter_mppt_current", "ok", "No MPPT limits configured", facts=facts)
     if worst > 1.05:
-        return Check("inverter_mppt_current", "watch", "An MPPT input ran over its current limit", facts=facts,
-                     title="MPPT input over its current limit",
+        return Check("inverter_mppt_current", "watch", f"{hit} ran over its current limit", facts=facts,
+                     title=f"{hit} over its current limit",
                      detail="One string drew more current than its MPPT input is rated for.",
                      action="Check the string's panel count and wiring against the inverter's input rating.")
     if worst >= 0.98:
-        return Check("inverter_mppt_current", "info", "A string touched its MPPT current limit", facts=facts,
-                     title="A string at its MPPT input limit at times",
+        return Check("inverter_mppt_current", "info", f"{hit} touched its MPPT current limit", facts=facts,
+                     title=f"{hit} at its input limit at times",
                      detail="On bright, cold days the string flat-tops slightly at the input limit. That costs a few "
                             "percent of an hour and harms nothing.",
                      action="None.")
@@ -904,27 +990,28 @@ def rule_inverter_pv_voltage(c: Ctx) -> Check:
 
 
 def rule_arrays_balance(c: Ctx) -> Check:
+    labels = mppt_labels(c)
     full = [d for d in c.daily if not d["partial"] and d["pv"] > 0]
     if len(full) < 2:
         return Check("arrays_balance", "ok", "Not enough full days to compare")
     best = max(d["pv"] for d in full)
-    best_by_array = [max(d["arrays"][k] for d in full) or 1 for k in range(len(c.array_names))]
+    best_by_array = [max(d["arrays"][k] for d in full) or 1 for k in range(len(labels))]
     low = [d for d in full if d["pv"] < 0.7 * best]
     weird = []
     for d in low:
-        ratios = [d["arrays"][k] / best_by_array[k] for k in range(len(c.array_names))]
+        ratios = [d["arrays"][k] / best_by_array[k] for k in range(len(labels))]
         if max(ratios) - min(ratios) > 0.25:
             weird.append((d, ratios))
     facts = [(d["day"], " · ".join(f"{n} {d['arrays'][k] / best_by_array[k] * 100:.0f}%"
-                                   for k, n in enumerate(c.array_names))) for d in low]
+                                   for k, n in enumerate(labels))) for d in low]
     if weird:
         d, ratios = weird[0]
         k = ratios.index(min(ratios))
-        return Check("arrays_balance", "watch", f"{c.array_names[k]} fell behind on {d['day']}",
-                     title=f"{c.array_names[k]} underperformed on {d['day']}",
-                     detail=f"On {d['day']} {c.array_names[k]} made {ratios[k] * 100:.0f}% of its best day while the "
+        return Check("arrays_balance", "watch", f"{labels[k]} fell behind on {d['day']}",
+                     title=f"{labels[k]} underperformed on {d['day']}",
+                     detail=f"On {d['day']} {labels[k]} made {ratios[k] * 100:.0f}% of its best day while the "
                             "others did not drop as much. Cloud lowers all arrays together, so this points at that array.",
-                     action=f"Look for shading, snow, dirt or a tripped breaker on {c.array_names[k]}.", facts=facts)
+                     action=f"Look for shading, snow, dirt or a tripped breaker on {labels[k]}.", facts=facts)
     if low:
         names = ", ".join(f"{d['day']} ({d['pv']:.0f} kWh)" for d in low)
         return Check("arrays_balance", "info", f"Low days explained by weather: {names}",
@@ -1040,6 +1127,152 @@ def _notes(c: Ctx) -> list[Check]:
     return notes
 
 
+# Panels: temperatures, alarms, MPPT
+
+
+def mppt_labels(c: Ctx) -> list[str]:
+    return [f"MPPT{k + 1} · {name}" for k, name in enumerate(c.array_names)]
+
+
+TEMP_SENSORS = (
+    ("tradiator1", "Heatsink 1", "heatsink"),
+    ("tradiator2", "Heatsink 2", "heatsink"),
+    ("tradiator3", "Heatsink 3", "heatsink"),
+    ("tinner", "Inverter internal", "internal"),
+    ("tBat", "Battery (BT)", "battery"),
+    ("MinCellTemp", "Cells, lowest", "cell"),
+    ("MaxCellTemp", "Cells, highest", "cell"),
+)
+
+
+def temperatures(c: Ctx) -> list[dict[str, Any]]:
+    rows = []
+    gap = radiator_gap(c)
+    imbalance = float(c.settings.get("temp_imbalance") or DEFAULT_IMBALANCE_C)
+    for col, name, cls in TEMP_SENSORS:
+        if not c.log.has(col):
+            continue
+        vals = c.log.f(col)
+        v = _vals(vals)
+        if not v:
+            continue
+        top, top_t, _i = _max_at(c.log.t, vals)
+        watch, act = _temp_limits(c, cls)
+        status = "act" if top >= act else "watch" if top >= watch else "ok"
+        note = ""
+        if len(v) > 50 and min(v) == top:
+            note = f"reads {top:g} °C the whole period; the sensor may not be connected"
+        if cls == "cell" and min(v) < 0:
+            status, note = "act", "below freezing; the BMS limits charging"
+        if col == "tradiator1" and gap is not None:
+            note = f"{gap:+.1f} °C vs heatsinks 2/3 overnight with no PV"
+            if gap >= imbalance and status == "ok":
+                status = "watch"
+                note += ": airflow/fan"
+        rows.append({
+            "sensor": name, "column": col, "min": min(v), "max": top, "typical": round(statistics.median(v), 1),
+            "max_at": top_t.isoformat(), "watch": watch, "act": act, "status": status, "note": note,
+        })
+    return rows
+
+
+def bms_occurrences(c: Ctx) -> list[dict[str, Any]]:
+    out = []
+    for col in ("BMSEvent1", "BMSEvent2"):
+        if not c.log.has(col):
+            continue
+        values = c.log.codes(col)
+        for value in sorted({v for v in values if v}):
+            runs = _runs([v == value for v in values])
+            name = codes.BMS_CODES.get(value)
+            out.append({
+                "code": f"{col} 0x{value:02X}", "name": name or f"Unknown code 0x{value:02X}, not in the table",
+                "count": len(runs), "first": c.log.t[runs[0][0]].isoformat(), "last": c.log.t[runs[-1][1]].isoformat(),
+                "verdict": "act" if len(runs) >= 3 else "watch",
+                "source": "pylxpweb" if name else "unknown",
+            })
+    return out
+
+
+RECONNECT_HOLD_S = 300
+
+
+def _grid_events(c: Ctx) -> list[dict[str, Any]]:
+    """Grid losses with the inverter's 300 s reconnect hold taken off the logged duration."""
+    out = []
+    for a, b in _runs([not ok for ok in c.grid_ok]):
+        logged = (c.log.t[b] - c.log.t[a]).total_seconds() + c.log.interval * 60
+        out.append({"start": c.log.t[a], "end": c.log.t[b], "logged_s": logged,
+                    "real_s": max(logged - RECONNECT_HOLD_S, 0), "blip": a == b})
+    return out
+
+
+def alarms(c: Ctx, checks: Sequence[Check], occ: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    by = {x.id: x for x in checks}
+
+    def row(name: str, count: int, first: Any, last: Any, verdict: str, detail: str) -> dict[str, Any]:
+        iso = lambda v: v.isoformat() if isinstance(v, datetime) else v  # noqa: E731
+        return {"alarm": name, "count": count, "first": iso(first), "last": iso(last), "verdict": verdict, "detail": detail}
+
+    rows = []
+    for kind, check_id, name in (("fault", "inverter_faults", "Fault codes"), ("warning", "inverter_warnings", "Warning codes")):
+        o = occ[kind]
+        rows.append(row(name, sum(x["count"] for x in o), min((x["first"] for x in o), default=None),
+                        max((x["last"] for x in o), default=None), by[check_id].severity,
+                        "; ".join(x["why"] for x in o) if o else "none"))
+    b = occ["bms"]
+    rows.append(row("BMS alarms", sum(x["count"] for x in b), min((x["first"] for x in b), default=None),
+                    max((x["last"] for x in b), default=None),
+                    max((x["verdict"] for x in b), key=SEVERITY_ORDER.get, default="ok"),
+                    "; ".join(f"{x['name']} ×{x['count']}" for x in b) if b else "none"))
+    packs = int(c.settings.get("pack_count") or 0)
+    per = float(c.settings.get("pack_discharge_a") or 0)
+    limit = c.log.f("maxDischgCurr")
+    lows = [i for i, v in enumerate(limit) if v is not None and packs and per and v < packs * per * 0.97]
+    if packs and per:
+        worst = min((limit[i] for i in lows), default=packs * per)
+        online = int(round(worst / per))
+        text = f"{packs}/{packs} online" if not lows else f"{packs - online} pack{'s' if packs - online != 1 else ''} out"
+        rows.append(row(f"Packs ({text})", len(_runs([i in set(lows) for i in range(len(limit))])) if lows else 0,
+                        c.log.t[lows[0]] if lows else None, c.log.t[lows[-1]] if lows else None,
+                        by["battery_packs_online"].severity, f"discharge limit {worst:g} A of {packs * per:g} A"))
+    events = _grid_events(c)
+    rows.append(row("Grid events", len(events), events[0]["start"] if events else None,
+                    events[-1]["end"] if events else None, by["grid_outages"].severity,
+                    "; ".join(f"{_day(e['start'])} {_hm(e['start'])} {'blip' if e['blip'] else _hours(e['real_s'] / 60)}"
+                              for e in events[:6]) if events else "grid present throughout"))
+    over = [i for i, v in enumerate(c.log.f("vacr")) if (v or 0) > c.hv_watch]
+    hours = sum(d["h_over"] for d in c.daily)
+    rows.append(row(f"Over-voltage hours (> {c.hv_watch:g} V)", len({c.log.t[i].date() for i in over}),
+                    c.log.t[over[0]] if over else None, c.log.t[over[-1]] if over else None,
+                    by["grid_high_voltage"].severity, f"{hours:.1f} h"))
+    return rows
+
+
+def mppt_rows(c: Ctx) -> list[dict[str, Any]]:
+    total = sum(d["pv"] for d in c.daily) or 1
+    limits = list(c.settings.get("mppt_limits_a") or [])
+    currents = _mppt_currents(c)
+    rows = []
+    for k, label in enumerate(mppt_labels(c)):
+        kwh = sum(d["arrays"][k] for d in c.daily)
+        p = c.log.kw(f"ppv{k + 1}")
+        v = c.log.f(f"vpv{k + 1}")
+        pk, pk_t, _i = _max_at(c.log.t, p)
+        amps, amps_t, _j = _max_at(c.log.t, currents[k]) if k < len(currents) else (None, None, None)
+        # Operating voltage while the string is working hard (at least half its peak)
+        working = [v[i] for i in range(len(p)) if pk and (p[i] or 0) >= 0.5 * pk and v[i] is not None]
+        lim = limits[k] if k < len(limits) else None
+        rows.append({
+            "label": label, "name": c.array_names[k], "kwh": round(kwh, 1), "share_pct": round(kwh / total * 100, 1),
+            "peak_kw": round(pk, 2) if pk is not None else None, "peak_at": pk_t.isoformat() if pk_t else None,
+            "peak_a": round(amps, 1) if amps is not None else None, "limit_a": lim,
+            "v_min": min(working) if working else None, "v_max": max(working) if working else None,
+            "status": "info" if lim and amps and amps >= 0.98 * lim else "ok",
+        })
+    return rows
+
+
 # Report assembly
 
 
@@ -1077,7 +1310,7 @@ def _stats(c: Ctx) -> list[dict[str, str]]:
     for k, name in enumerate(c.array_names):
         p = log.kw(f"ppv{k + 1}")
         top, top_t, _i = _max_at(log.t, p)
-        stats.append({"label": f"{name} · MPPT{k + 1}", "value": f"{sum(d['arrays'][k] for d in daily):.0f} kWh",
+        stats.append({"label": f"MPPT{k + 1} · {name}", "value": f"{sum(d['arrays'][k] for d in daily):.0f} kWh",
                       "sub": f"peak {top:.2f} kW on {_day(top_t)}" if top is not None else ""})
     loads = [d["load"] for d in daily if not d["partial"]] or [d["load"] for d in daily]
     stats.append({"label": "House load", "value": f"{load:.0f} kWh",
@@ -1129,25 +1362,17 @@ def _summary(c: Ctx, checks: Sequence[Check], verdict: str) -> tuple[str, str]:
     return first, worst[0].detail if worst else ""
 
 
-def _chips(c: Ctx, checks: Sequence[Check]) -> list[dict[str, str]]:
-    log = c.log
-    by = {x.id: x for x in checks}
-    faults = sum(1 for x in log.codes("faultCode") if x)
-    warns = sum(1 for x in log.codes("warningCode") if x)
-    bms = sum(1 for a, b in zip(log.codes("BMSEvent1"), log.codes("BMSEvent2")) if a or b)
-    outages = len(_runs([not ok for ok in c.grid_ok]))
-    chips = [
-        {"label": f"Fault codes {faults}", "status": "ok" if not faults else "act"},
-        {"label": f"Warning codes {warns}", "status": "ok" if not warns else "watch"},
-        {"label": f"BMS events {bms}", "status": "ok" if not bms else "watch"},
-        {"label": f"Grid outages {outages}", "status": "ok" if not outages else "watch"},
-    ]
+def _chips(checks: Sequence[Check], alarm_rows: Sequence[dict[str, Any]]) -> list[dict[str, str]]:
+    """Verdict chips: the alarm panel's rows first, so the headline and the panel always agree."""
+    short = {"Fault codes": "Fault codes", "Warning codes": "Warning codes", "BMS alarms": "BMS events",
+             "Grid events": "Grid outages"}
+    chips = [{"label": f"{short[r['alarm']]} {r['count']}", "status": r["verdict"]}
+             for r in alarm_rows if r["alarm"] in short]
+    covered = {"inverter_faults", "inverter_warnings", "grid_outages"}
     for x in sorted(checks, key=lambda x: -SEVERITY_ORDER[x.severity]):
-        if x.severity in ("act", "watch", "info") and x.id not in ("inverter_faults", "inverter_warnings", "grid_outages"):
+        if x.severity != "ok" and x.id not in covered:
             chips.append({"label": x.title, "status": x.severity})
-    del by
     return chips[:9]
-
 
 def _series(c: Ctx) -> dict[str, Any]:
     log = c.log
@@ -1161,10 +1386,14 @@ def _series(c: Ctx) -> dict[str, Any]:
         "soc": log.f("SOC(%)"),
         "cell_max": log.f("MaxCellVoltage"),
         "cell_min": log.f("MinCellVoltage"),
+        "rad1": log.f("tradiator1"),
+        "rad2": log.f("tradiator2"),
+        "rad3": log.f("tradiator3"),
+        "tbat": log.f("tBat"),
         "soc_floor": c.soc_floor,
         "bars": {
             "cats": [d["day"] for d in c.daily],
-            "arrays": [{"name": n, "values": [d["arrays"][k] for d in c.daily]} for k, n in enumerate(c.array_names)],
+            "arrays": [{"name": n, "values": [d["arrays"][k] for d in c.daily]} for k, n in enumerate(mppt_labels(c))],
             "load": [d["load"] for d in c.daily],
             "export": [d["export"] for d in c.daily],
             "import": [d["import"] for d in c.daily],
@@ -1174,7 +1403,7 @@ def _series(c: Ctx) -> dict[str, Any]:
     # Logger gaps break the lines
     for i, d in reversed(list(enumerate(log.diffs))):
         if d > 3 * log.interval:
-            for key in ("pv", "ac", "v", "soc", "cell_max", "cell_min"):
+            for key in ("pv", "ac", "v", "soc", "cell_max", "cell_min", "rad1", "rad2", "rad3", "tbat"):
                 series[key].insert(i + 1, None)
             series["t"].insert(i + 1, round(series["t"][i] + log.interval / 60, 3))
     return series
@@ -1186,7 +1415,7 @@ def _downsample(series: dict[str, Any], limit: int = MAX_ATTR_POINTS) -> dict[st
         return series
     step = math.ceil(n / limit)
     out = dict(series)
-    for key in ("t", "pv", "ac", "v", "soc", "cell_max", "cell_min"):
+    for key in ("t", "pv", "ac", "v", "soc", "cell_max", "cell_min", "rad1", "rad2", "rad3", "tbat"):
         out[key] = series[key][::step]
     return out
 
@@ -1219,6 +1448,7 @@ def build_report(
 
     c = _build_ctx(log, settings, start, end)
     checks = [rule(c) for rule in RULES]
+    occ = {"fault": code_occurrences(c, "fault"), "warning": code_occurrences(c, "warning"), "bms": bms_occurrences(c)}
     known = {s.strip() for s in settings.get("known_issues", "").split(",") if s.strip()}
     apply_known_issues(checks, known)
     notes = _notes(c)
@@ -1246,16 +1476,22 @@ def build_report(
         "clip_min": sum(d["clip_min"] for d in c.daily),
     }
     full_series = _series(c)
+    alarm_rows = alarms(c, checks, occ)
     return {
         "verdict": verdict,
         "summary": summary,
         "detail": detail,
-        "chips": _chips(c, checks),
+        "chips": _chips(checks, alarm_rows),
         "range": {"start": start.isoformat(), "end": end.isoformat()},
         "through": log.t[-1].isoformat(),
         "samples": len(log),
         "interval_min": round(log.interval, 1),
         "array_names": c.array_names,
+        "array_labels": mppt_labels(c),
+        "temperatures": temperatures(c),
+        "alarms": alarm_rows,
+        "codes": occ["fault"] + occ["warning"] + occ["bms"],
+        "mppt": mppt_rows(c),
         "battery_kwh": c.battery_kwh,
         "counts": counts,
         "checks": [x.table_row() for x in checks],

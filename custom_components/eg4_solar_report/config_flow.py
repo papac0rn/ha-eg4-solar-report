@@ -80,6 +80,9 @@ from .const import (
     SEVERITY_WATCH,
     SYSTEM_PROFILES,
     SYSTEM_TYPES,
+    TEMP_THRESHOLDS,
+    OPT_TEMP_IMBALANCE,
+    DEFAULT_TEMP_IMBALANCE,
     WEEKDAYS,
 )
 
@@ -386,4 +389,9 @@ class Eg4SolarReportOptionsFlow(OptionsFlow):
             )
         )
         schema[vol.Optional(OPT_KNOWN_ISSUES, description={"suggested_value": opts.get(OPT_KNOWN_ISSUES, "")})] = str
+        for cls, (watch, act) in TEMP_THRESHOLDS.items():
+            for level, default in (("watch", watch), ("act", act)):
+                key = f"temp_{cls}_{level}"
+                schema[vol.Required(key, default=opts.get(key, default))] = _number(-20, 150, 1, "°C")
+        schema[vol.Required(OPT_TEMP_IMBALANCE, default=opts.get(OPT_TEMP_IMBALANCE, DEFAULT_TEMP_IMBALANCE))] = _number(0.5, 20, 0.1, "°C")
         return self.async_show_form(step_id="init", data_schema=vol.Schema(schema))

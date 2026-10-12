@@ -1,21 +1,16 @@
-"""Chart SVG tests. Loads charts.py by path so Home Assistant isn't needed.
+"""Chart SVG tests (charts.py is loaded through conftest's eg4sr package, so Home Assistant isn't needed).
 
 Set EG4_CHART_OUT=<folder> to also write the SVGs there for a visual check.
 """
 from __future__ import annotations
 
-import importlib.util
-import sys
+import importlib
 import math
 import os
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
-_PATH = Path(__file__).parents[1] / "custom_components" / "eg4_solar_report" / "charts.py"
-_spec = importlib.util.spec_from_file_location("eg4_charts", _PATH)
-charts = importlib.util.module_from_spec(_spec)
-sys.modules[_spec.name] = charts  # dataclasses need the module registered
-_spec.loader.exec_module(charts)
+charts = importlib.import_module("eg4sr.charts")
 
 SETTINGS = {"hv_watch": 254, "hv_act": 264, "output_ceiling_kw": 16, "cell_v_max": 3.65}
 
@@ -23,7 +18,7 @@ SETTINGS = {"hv_watch": 254, "hv_act": 264, "output_ceiling_kw": 16, "cell_v_max
 def _week_series() -> dict:
     # 8 days of synthetic 4-minute samples
     t = [i * 4 / 60 for i in range(8 * 360)]
-    pv, ac, soc, v, cmax, cmin = [], [], [], [], [], []
+    pv, ac, soc, v, cmax, cmin, rad = [], [], [], [], [], [], []
     for h in t:
         hod = h % 24
         sun = max(0.0, math.sin((hod - 7) / 12 * math.pi))
@@ -33,12 +28,14 @@ def _week_series() -> dict:
         v.append(round(248 + 13 * sun, 1))
         cmax.append(round(3.33 + 0.25 * sun, 3))
         cmin.append(round(3.31 + 0.22 * sun, 3))
+        rad.append(round(40 + 30 * sun, 1))
     v[500] = None  # a logger gap
     cmin[1200] = 3.404  # the one-sample blip
     cats = [f"Oct {d}" for d in range(1, 9)]
     return {
         "t0": "2026-10-01T00:02:00-04:00",
         "t": t, "pv": pv, "ac": ac, "soc": soc, "v": v, "cell_max": cmax, "cell_min": cmin,
+        "rad1": [r + 3 for r in rad], "rad2": rad, "rad3": [r - 1 for r in rad], "tbat": [22.0] * len(t),
         "soc_floor": 20,
         "bars": {
             "cats": cats,
@@ -65,11 +62,11 @@ def _check_svg(data: bytes) -> ET.Element:
     return root
 
 
-def test_all_six_charts_render_well_formed():
+def test_all_seven_charts_render_well_formed():
     out = os.environ.get("EG4_CHART_OUT")
     rendered = charts.render_all(_week_series(), SETTINGS)
     assert list(rendered) == list(charts.CHARTS)
-    assert len(rendered) == 6
+    assert len(rendered) == 7
     for name, data in rendered.items():
         _check_svg(data)
         assert b"No data" not in data, name

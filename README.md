@@ -61,6 +61,7 @@ them against your own inverter settings.
 | `image.<station>_chart_grid_voltage` | Line voltage with the Watch and trip thresholds |
 | `image.<station>_chart_soc` | Battery state of charge, with its floor |
 | `image.<station>_chart_cell_voltage` | Highest and lowest cell voltage, with the cell limit |
+| `image.<station>_chart_temperatures` | Heatsinks 1–3 and battery temperature |
 
 The charts are drawn by the integration itself as SVG images and redrawn on every run. Show them with the built-in
 **Picture entity** card; no custom cards are needed.
@@ -68,6 +69,23 @@ The charts are drawn by the integration itself as SVG images and redrawn on ever
 **Service** `eg4_solar_report.generate` (optional `period`, `end_date`, `config_entry_id`).
 
 **Event** `eg4_solar_report_generated`, with `verdict`, `range`, `counts` and `new_findings`. Use it for your own automations.
+
+### What the report sensor carries
+
+Besides the verdict, the `sensor.<station>_report` attributes hold everything a dashboard needs:
+
+- `summary`, `detail`, `chips`: the one-sentence answer and its status chips
+- `stats`: the stat grid; `mppt`: one row per MPPT ("MPPT1 · South"), with kWh, share, peak kW, peak current against
+  its limit and operating-voltage range
+- `daily` and `totals`: the day-by-day table
+- `alarms`: fault codes, warning codes, BMS alarms, packs online, grid events (the 300 s reconnect hold is taken off)
+  and over-voltage hours, each with count, first and last time, and a verdict
+- `temperatures`: heatsinks 1–3, inverter internal, battery and cell min/max, each with min, max, typical and a status.
+  Thresholds are editable under **Configure**.
+- `codes`: every fault, warning or BMS code seen, decoded with its name, meaning, causes and advice, and judged
+  **transient** (cleared on its own, often during a grid event) or **persistent** (repeats or lasts). Unknown codes are
+  rated Watch, never ignored. Code names come from pylxpweb's tables.
+- `findings`, `checks`, `actions`: the findings ledger, the 21 checks, and the numbered "What to do" list
 
 ## Diagnostics
 

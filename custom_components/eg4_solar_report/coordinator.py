@@ -56,6 +56,8 @@ from .const import (
     OPT_WEEKLY_TIME,
     PERIOD_7_DAYS,
     PERIOD_TODAY,
+    TEMP_THRESHOLDS,
+    OPT_TEMP_IMBALANCE,
     SERVERS,
     SEVERITY_ACT,
     VERDICT_ERROR,
@@ -192,6 +194,12 @@ class ReportManager:
             "hv_watch": data.get(CONF_HV_WATCH),
             "hv_act": data.get(CONF_HV_ACT),
             "known_issues": opts.get(OPT_KNOWN_ISSUES, ""),
+            "temp_imbalance": opts.get(OPT_TEMP_IMBALANCE),
+            **{
+                f"temp_{cls}_{level}": opts.get(f"temp_{cls}_{level}")
+                for cls in TEMP_THRESHOLDS
+                for level in ("watch", "act")
+            },
         }
 
     async def async_generate(

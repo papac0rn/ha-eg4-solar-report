@@ -64,6 +64,16 @@ OPT_NOTIFY_SERVICE = "notify_service"
 OPT_NOTIFY_SEVERITIES = "notify_severities"
 OPT_KNOWN_ISSUES = "known_issues"
 
+# Temperature thresholds (°C): sensor class -> (watch, act); heatsinks leave room above a normal 93 °C summer peak
+TEMP_THRESHOLDS = {
+    "heatsink": (95, 105),
+    "internal": (70, 80),
+    "battery": (45, 55),
+    "cell": (45, 55),
+}
+OPT_TEMP_IMBALANCE = "temp_imbalance"
+DEFAULT_TEMP_IMBALANCE = 3.0
+
 WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 DEFAULT_WEEKLY_DAY = "sun"
 DEFAULT_WEEKLY_TIME = "21:00:00"

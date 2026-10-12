@@ -105,14 +105,25 @@
           "outage_delay_minutes": "Wait after the grid returns",
           "notify_service": "Notify service",
           "notify_severities": "Push these severities",
-          "known_issues": "Known issues"
+          "known_issues": "Known issues",
+          "temp_heatsink_watch": "Heatsink Watch at",
+          "temp_heatsink_act": "Heatsink Act at",
+          "temp_internal_watch": "Inverter internal Watch at",
+          "temp_internal_act": "Inverter internal Act at",
+          "temp_battery_watch": "Battery (BT) Watch at",
+          "temp_battery_act": "Battery (BT) Act at",
+          "temp_cell_watch": "Battery cells Watch at",
+          "temp_cell_act": "Battery cells Act at",
+          "temp_imbalance": "Heatsink 1 overnight imbalance Watch at"
         },
         "data_description": {
           "weekly_day": "The weekly report covers the 7 days ending on this day.",
           "outage_entity": "A binary sensor that is on while the system is off-grid.",
           "outage_delay_minutes": "Gives the EG4 cloud time to catch up before the report runs.",
           "notify_service": "For example notify.mobile_app_my_phone. Leave empty for no pushes.",
-          "known_issues": "Comma-separated finding IDs to report as Info instead of Watch or Act."
+          "known_issues": "Comma-separated finding IDs to report as Info instead of Watch or Act.",
+          "temp_heatsink_watch": "A normal summer peak can reach about 93 °C, so the default leaves room above it.",
+          "temp_imbalance": "How much warmer heatsink 1 may sit than heatsinks 2 and 3 overnight, with no PV, before it points to airflow or a fan."
         }
       }
     }
