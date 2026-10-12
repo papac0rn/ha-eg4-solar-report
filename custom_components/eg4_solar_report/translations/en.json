@@ -1,0 +1,139 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "EG4 Monitor Center account",
+        "description": "Sign in with the account you use for the EG4 Monitor Center website. This is unofficial access and is not affiliated with EG4. Your login is stored only in Home Assistant.",
+        "data": {
+          "server": "Server",
+          "username": "Username",
+          "password": "Password"
+        }
+      },
+      "plant": {
+        "title": "Choose your station",
+        "data": {
+          "plant_id": "Station"
+        }
+      },
+      "system": {
+        "title": "Your system",
+        "data": {
+          "inverters": "Inverters to include",
+          "system_type": "System type",
+          "parallel_count": "Inverters in parallel",
+          "gridboss": "GridBOSS installed"
+        }
+      },
+      "battery": {
+        "title": "Battery and solar arrays",
+        "data": {
+          "battery_kwh": "Usable battery capacity",
+          "array_count": "Number of PV strings or arrays"
+        },
+        "data_description": {
+          "battery_kwh": "Enter 0 to work it out from the log."
+        }
+      },
+      "grid": {
+        "title": "Grid and rates",
+        "data": {
+          "import_rate": "Import rate",
+          "export_credit": "Export credit",
+          "nominal_voltage": "Nominal grid voltage",
+          "hv_watch": "High-voltage Watch threshold",
+          "hv_act": "High-voltage Act threshold"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Sign in again",
+        "description": "The EG4 Monitor Center rejected the saved login. Enter your current password.",
+        "data": {
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "The Monitor Center rejected that username or password.",
+      "cannot_connect": "Could not reach the Monitor Center. Check the server and try again.",
+      "no_plants": "This account has no stations.",
+      "no_inverters": "No inverters were found on this station."
+    },
+    "abort": {
+      "already_configured": "This station is already set up.",
+      "reauth_successful": "Signed in again."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Report settings",
+        "data": {
+          "weekly_enabled": "Weekly report",
+          "weekly_day": "Weekly report day",
+          "weekly_time": "Weekly report time",
+          "outage_enabled": "Report after a grid outage",
+          "outage_entity": "Off-grid sensor",
+          "outage_delay_minutes": "Wait after the grid returns",
+          "notify_service": "Notify service",
+          "notify_severities": "Push these severities",
+          "known_issues": "Known issues"
+        },
+        "data_description": {
+          "weekly_day": "The weekly report covers the 7 days ending on this day.",
+          "outage_entity": "A binary sensor that is on while the system is off-grid.",
+          "outage_delay_minutes": "Gives the EG4 cloud time to catch up before the report runs.",
+          "notify_service": "For example notify.mobile_app_my_phone. Leave empty for no pushes.",
+          "known_issues": "Comma-separated finding IDs to report as Info instead of Watch or Act."
+        }
+      }
+    }
+  },
+  "selector": {
+    "server": {
+      "options": {
+        "us_eg4": "EG4 Monitor Center (US)",
+        "us_lux": "Luxpower (US)",
+        "eu_lux": "Luxpower (EU)"
+      }
+    },
+    "weekday": {
+      "options": {
+        "mon": "Monday",
+        "tue": "Tuesday",
+        "wed": "Wednesday",
+        "thu": "Thursday",
+        "fri": "Friday",
+        "sat": "Saturday",
+        "sun": "Sunday"
+      }
+    },
+    "severity": {
+      "options": {
+        "act": "Act",
+        "watch": "Watch",
+        "info": "Info"
+      }
+    }
+  },
+  "services": {
+    "generate": {
+      "name": "Generate report",
+      "description": "Download the EG4 data for a range and analyze it.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Station",
+          "description": "Which station to report on. Leave empty for all."
+        },
+        "period": {
+          "name": "Period",
+          "description": "Today, or the 7 days ending on the end date. Defaults to the Report Period entity."
+        },
+        "end_date": {
+          "name": "End date",
+          "description": "Last day of the report. Defaults to the Report End Date entity."
+        }
+      }
+    }
+  }
+}

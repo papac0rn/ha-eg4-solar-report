@@ -1,0 +1,29 @@
+name: Python Checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Byte-compile the integration
+        run: python -m compileall -q -f custom_components/eg4_solar_report
+
+  analyzer-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install test dependencies
+        run: pip install pytest xlrd==2.0.1
+      - name: Run analyzer tests
+        run: python -m pytest -q tests

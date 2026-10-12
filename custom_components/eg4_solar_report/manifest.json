@@ -1,0 +1,12 @@
+{
+  "domain": "eg4_solar_report",
+  "name": "EG4 Solar Report",
+  "codeowners": ["@papac0rn"],
+  "config_flow": true,
+  "documentation": "https://github.com/papac0rn/ha-eg4-solar-report",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/papac0rn/ha-eg4-solar-report/issues",
+  "requirements": ["xlrd==2.0.1"],
+  "version": "0.1.0"
+}

@@ -1,0 +1,15 @@
+generate:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: eg4_solar_report
+    period:
+      selector:
+        select:
+          options:
+            - "Today"
+            - "7 days"
+    end_date:
+      selector:
+        date: {}
