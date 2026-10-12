@@ -14,7 +14,7 @@ from .coordinator import ReportManager
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["sensor", "binary_sensor", "select", "date", "button"]
+PLATFORMS = ["sensor", "binary_sensor", "select", "date", "button", "image"]
 
 GENERATE_SCHEMA = vol.Schema(
     {

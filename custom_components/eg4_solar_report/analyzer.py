@@ -61,7 +61,8 @@ NUMBER_KEYS = (
     "battery_out_kwh", "round_trip_pct", "soc_min", "soc_max", "battery_kwh", "solar_value",
 )
 DAILY_KEYS = ("day", "pv_by_array", "pv", "home", "sent", "bought", "soc_min", "soc_max")
-# t: hours since t0 per sample; pv/load kW, soc %, v volts; bars: {cats, <array>: kWh per day}
+# t0 ISO start; t hours since t0 per sample; pv/load kW, soc %, v volts (None = gap);
+# bars {"cats": [day labels], "arrays": [{"name", "values": kWh per day}]}. charts.py draws these.
 SERIES_KEYS = ("t0", "t", "pv", "load", "soc", "v", "bars")
 
 

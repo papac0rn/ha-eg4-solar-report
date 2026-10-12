@@ -16,7 +16,7 @@ from homeassistant.helpers.event import (
 )
 from homeassistant.util import dt as dt_util
 
-from . import analyzer
+from . import analyzer, charts
 from .api import Eg4AuthError, Eg4Error, Eg4MonitorClient
 from .const import (
     CONF_ARRAY_NAMES,
@@ -82,6 +82,8 @@ class ReportManager:
         self.report: dict[str, Any] | None = None
         self.error: str | None = None
         self.last_generated: datetime | None = None
+        self.charts: dict[str, bytes] = charts.render_placeholders()
+        self.charts_updated: datetime = dt_util.utcnow()
         self.running = False
         self._lock = asyncio.Lock()
         self._listeners: list[Callable[[], None]] = []
@@ -212,8 +214,12 @@ class ReportManager:
                         files.append(await self.client.async_download_export(serial, day))
                         day += timedelta(days=1)
                     exports[serial] = files
+                settings = self._settings()
                 report = await self.hass.async_add_executor_job(
-                    analyzer.build_report, exports, self._settings(), start, end
+                    analyzer.build_report, exports, settings, start, end
+                )
+                rendered = await self.hass.async_add_executor_job(
+                    charts.render_all, report.get("series"), settings
                 )
             except Exception as err:  # noqa: BLE001 - any failure becomes the red error state
                 if isinstance(err, (Eg4Error, analyzer.AnalyzerError)):
@@ -233,6 +239,8 @@ class ReportManager:
             report["period"] = period
             report["trigger"] = trigger
             self.report = report
+            self.charts = rendered
+            self.charts_updated = dt_util.utcnow()
             self.error = None
             self.last_generated = dt_util.now()
             self.running = False

@@ -55,6 +55,13 @@ them against your own inverter settings.
 | `sensor.<station>_report` | Verdict (`healthy` / `watch` / `act` / `error`); counts, findings, key numbers and chart series as attributes |
 | `binary_sensor.<station>_action_needed` | On when the verdict is `act` or the report failed |
 | `sensor.<station>_last_generated` | When the last report finished |
+| `image.<station>_chart_daily_pv` | Daily PV harvest by array (stacked columns) |
+| `image.<station>_chart_pv_load` | PV production vs. home load |
+| `image.<station>_chart_soc` | Battery state of charge |
+| `image.<station>_chart_grid_voltage` | Grid voltage with the Watch and trip thresholds |
+
+The charts are drawn by the integration itself as SVG images and redrawn on every run. Show them with the built-in
+**Picture entity** card; no custom cards are needed.
 
 **Service** `eg4_solar_report.generate` (optional `period`, `end_date`, `config_entry_id`).
 
