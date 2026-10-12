@@ -21,6 +21,8 @@ DEVICE_TYPE_GRIDBOSS = 9
 # The server returns at most 10 day-sheets from the start date
 MAX_EXPORT_DAYS = 10
 XLS_SIGNATURE = b"\xd0\xcf\x11\xe0"
+# Nominal voltage of a 16-cell LiFePO4 pack, for Ah -> kWh
+NOMINAL_PACK_V = 51.2
 
 
 class Eg4Error(Exception):
@@ -66,6 +68,23 @@ class Eg4MonitorClient:
             for d in resp.rows
             if d.serialNum and d.deviceType != DEVICE_TYPE_GRIDBOSS
         ]
+
+    async def async_get_battery(self, serial: str) -> dict[str, Any] | None:
+        """Battery bank size from the BMS: full capacity in Ah, pack count, and kWh at the nominal 51.2 V.
+
+        Used to pre-fill setup; returns None when the bank doesn't report a believable capacity.
+        """
+        try:
+            info = await self._client.devices.get_battery_info(serial)
+        except LuxpowerError as err:
+            _LOGGER.debug("Battery info unavailable for setup pre-fill: %s", err)
+            return None
+        modules = [m for m in info.batteryArray if not m.lost]
+        ah = info.fullCapacity or sum(m.currentFullCapacity for m in modules) or None
+        packs = info.totalNumber or len(info.batteryArray) or None
+        if not ah or not 20 <= ah <= 20000:
+            return {"ah": None, "packs": packs, "kwh": None}
+        return {"ah": ah, "packs": packs, "kwh": round(ah * NOMINAL_PACK_V / 1000, 1)}
 
     async def async_download_export(self, serial: str, start: date, end: date) -> bytes:
         """Return the .xls data export for one inverter, one sheet per day (at most 10 days)."""

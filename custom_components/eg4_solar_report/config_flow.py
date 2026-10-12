@@ -125,6 +125,7 @@ class Eg4SolarReportConfigFlow(ConfigFlow, domain=DOMAIN):
         self._client: Eg4MonitorClient | None = None
         self._plants: list[dict[str, Any]] = []
         self._inverters: list[dict[str, Any]] = []
+        self._battery: dict[str, Any] | None = None
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
         """Step 1: Monitor Center account."""
@@ -248,17 +249,25 @@ class Eg4SolarReportConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_battery(self, user_input: dict[str, Any] | None = None):
-        """Step 3: battery."""
+        """Step 3: battery, pre-filled from the BMS when it reports its capacity."""
         if user_input is not None:
             self._data.update(user_input)
             return await self.async_step_arrays()
 
+        if self._battery is None and self._client and self._data.get(CONF_INVERTERS):
+            self._battery = await self._client.async_get_battery(self._data[CONF_INVERTERS][0]) or {}
+        bank = self._battery or {}
+        kwh_default = bank.get("kwh") or DEFAULT_BATTERY_KWH
+        packs_default = bank.get("packs") or DEFAULT_PACK_COUNT
         return self.async_show_form(
             step_id="battery",
+            description_placeholders={
+                "bms": f"{bank['ah']:g} Ah × 51.2 V = {bank['kwh']:g} kWh" if bank.get("kwh") else "not reported"
+            },
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_BATTERY_KWH, default=DEFAULT_BATTERY_KWH): _number(0, 1000, 0.1, "kWh"),
-                    vol.Required(CONF_PACK_COUNT, default=DEFAULT_PACK_COUNT): _number(1, 64, 1),
+                    vol.Required(CONF_BATTERY_KWH, default=kwh_default): _number(0, 1000, 0.1, "kWh"),
+                    vol.Required(CONF_PACK_COUNT, default=packs_default): _number(1, 64, 1),
                     vol.Required(CONF_PACK_DISCHARGE_A, default=DEFAULT_PACK_DISCHARGE_A): _number(10, 1000, 1, "A"),
                     vol.Required(CONF_CELL_V_MAX, default=DEFAULT_CELL_V_MAX): _number(2, 5, 0.01, "V"),
                 }
