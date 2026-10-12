@@ -151,3 +151,27 @@ def test_empty_range_raises():
     content = (FIXTURES / "day-2026-09-26.xls").read_bytes()
     with pytest.raises(analyzer.AnalyzerError):
         analyzer.build_report({"anon": [content]}, SETTINGS, date(2026, 9, 27), date(2026, 9, 27))
+
+
+@pytest.fixture(scope="module")
+def dropout_report() -> dict:
+    content = (FIXTURES / "pack-dropout-2026-08-24_27.xls").read_bytes()
+    return analyzer.build_report({"anon": [content]}, SETTINGS, date(2026, 8, 24), date(2026, 8, 27))
+
+
+def test_pack_dropout_is_caught_and_recovery_found(dropout_report):
+    """August: one of four packs was offline (600 A limit) until it rejoined at 12:53 on Aug 26."""
+    f = _finding(dropout_report, "battery_packs_online")
+    assert f["severity"] == "act"
+    assert f["title"] == "Battery pack offline: 3 of 4 packs"
+    assert "until Aug 26 12:49" in f["detail"]
+    assert "SOC stepped from 95% to 88%" in f["detail"]
+    assert dropout_report["verdict"] == "act"
+
+
+def test_multi_day_table(dropout_report):
+    days = [d["day"] for d in dropout_report["daily"]]
+    assert days == ["Aug 24", "Aug 25", "Aug 26", "Aug 27"]
+    assert dropout_report["daily"][0]["pv"] == pytest.approx(135.7, abs=0.05)
+    assert dropout_report["totals"]["pv"] == pytest.approx(135.7 + 139.1 + 97.4 + 121.7, abs=0.2)
+    assert _check(dropout_report, "data_counter_crosscheck")["status"] == "ok"

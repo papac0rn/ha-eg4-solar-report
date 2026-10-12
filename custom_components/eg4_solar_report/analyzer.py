@@ -134,33 +134,32 @@ def _parse_time(v: Any, datemode: int) -> datetime | None:
 
 
 def parse_export(content: bytes) -> tuple[list[str], list[dict[str, Any]]]:
-    """Parse one .xls export (one sheet per day) into its header and rows; each row gets a parsed `_t`."""
-    import xlrd  # imported here so the module loads before HA installs requirements
+    """Parse one .xls export (one sheet per day) into its header and rows; each row gets a parsed `_t`.
+
+    Uses pylxpweb's parser, the same one the EG4 Web Monitor integration ships with. Cells come back as text.
+    """
+    # Imported here so the module loads before HA installs requirements
+    from pylxpweb.endpoints.export import parse_export as lxp_parse_export
+    from pylxpweb.exceptions import LuxpowerAPIError
 
     try:
-        book = xlrd.open_workbook(file_contents=content)
-    except xlrd.XLRDError as err:
-        raise AnalyzerError(f"Export is not a readable .xls file: {err}") from err
+        sheets = lxp_parse_export(content)
+    except LuxpowerAPIError as err:
+        raise AnalyzerError(str(err)) from err
     header: list[str] = []
     rows: list[dict[str, Any]] = []
-    for sheet in book.sheets():
-        if sheet.nrows < 2:
+    for sheet in sheets:
+        if not sheet.rows or "Time" not in sheet.rows[0]:
             continue
-        sheet_header = [str(v).strip() for v in sheet.row_values(0)]
-        if "Time" not in sheet_header:
-            continue
-        header = header or sheet_header
-        ti = sheet_header.index("Time")
-        for r in range(1, sheet.nrows):
-            values = sheet.row_values(r)
-            t = _parse_time(values[ti], book.datemode)
+        header = header or list(sheet.rows[0])
+        for row in sheet.rows:
+            t = _parse_time(row["Time"], 0)
             if t is None:
                 continue
-            row = dict(zip(sheet_header, values))
-            row["_t"] = t
-            rows.append(row)
+            parsed: dict[str, Any] = dict(row)
+            parsed["_t"] = t
+            rows.append(parsed)
     return header, rows
-
 
 class Log:
     """Time-ordered samples from one inverter, with numeric column access."""
@@ -591,16 +590,30 @@ def rule_battery_packs_online(c: Ctx) -> Check:
         return Check("battery_packs_online", "ok",
                      f"Discharge limit {expected:g} A all {'week' if len(c.days) > 1 else 'day'}"
                      + (f": all {packs} packs reporting" if packs else ""))
-    first, worst = c.log.t[low[0]], min(limit[i] for i in low)
+    first, last, worst = c.log.t[low[0]], c.log.t[low[-1]], min(limit[i] for i in low)
+    online = int(round(worst / per)) if per else None
+    recovered = low[-1] + 1 < len(limit)
+    packs_txt = f"{online} of {packs} packs" if online is not None and packs else f"{worst:g} A"
+    when = ("from the start of the range" if low[0] == 0 else f"from {_day(first)} {_hm(first)}")
+    detail = (f"The BMS discharge limit should read {expected:g} A with all {packs or ''} packs online. It read "
+              f"{worst:g} A ({packs_txt}) {when}"
+              + (f" until {_day(last)} {_hm(last)}, when the missing pack rejoined" if recovered else ", and it had not recovered")
+              + f": {_hours(len(low) * c.log.interval)} in all.")
+    soc = c.log.f("SOC(%)")
+    if recovered and soc[low[-1]] is not None and soc[low[-1] + 1] is not None and soc[low[-1] + 1] < soc[low[-1]] - 2:
+        detail += (f" SOC stepped from {soc[low[-1]]:.0f}% to {soc[low[-1] + 1]:.0f}% at that moment, as the BMS "
+                   "re-counted capacity with the pack back.")
     return Check(
-        "battery_packs_online", "act", f"Discharge limit fell to {worst:g} A in {len(low)} sample(s)",
-        title=f"Battery discharge limit dropped to {worst:g} A",
-        detail=f"The BMS discharge limit should read {expected:g} A with all {packs or ''} packs online. It fell to "
-               f"{worst:g} A in {len(low)} sample(s), first at {_day(first)} {_hm(first)}, which usually means a pack "
-               "went offline.",
-        action="Check which pack is missing in the per-pack view, then its breaker and communication cable.",
+        "battery_packs_online", "act",
+        f"Discharge limit {worst:g} A ({packs_txt}) for {_hours(len(low) * c.log.interval)}"
+        + (", recovered" if recovered else ""),
+        title=f"Battery pack offline: {packs_txt}" if online is not None and packs else f"Discharge limit dropped to {worst:g} A",
+        detail=detail,
+        action="Check which pack dropped out in the per-pack view, then its breaker, communication cable and "
+               "terminal torque. A pack that drops and rejoins is the start of the August failure pattern.",
+        facts=[("Limit", f"{worst:g} A of {expected:g} A"), ("First", f"{_day(first)} {_hm(first)}"),
+               ("Last", f"{_day(last)} {_hm(last)}")],
     )
-
 
 def rule_battery_cell_balance(c: Ctx) -> Check:
     cmax, cmin = c.log.f("MaxCellVoltage"), c.log.f("MinCellVoltage")

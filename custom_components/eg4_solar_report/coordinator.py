@@ -208,12 +208,8 @@ class ReportManager:
             try:
                 exports: dict[str, list[bytes]] = {}
                 for serial in self.entry.data[CONF_INVERTERS]:
-                    files = []
-                    day = start
-                    while day <= end:
-                        files.append(await self.client.async_download_export(serial, day))
-                        day += timedelta(days=1)
-                    exports[serial] = files
+                    # One workbook per inverter, one sheet per day
+                    exports[serial] = [await self.client.async_download_export(serial, start, end)]
                 settings = self._settings()
                 report = await self.hass.async_add_executor_job(
                     analyzer.build_report, exports, settings, start, end

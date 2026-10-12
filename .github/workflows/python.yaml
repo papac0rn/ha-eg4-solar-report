@@ -18,12 +18,16 @@ jobs:
 
   analyzer-tests:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # The oldest pylxpweb the EG4 Web Monitor integration allows, and the newest
+        pylxpweb: ["==0.9.38", ""]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
       - name: Install test dependencies
-        run: pip install pytest xlrd==2.0.1
+        run: pip install pytest "xlrd>=2.0.1" "pylxpweb${{ matrix.pylxpweb }}"
       - name: Run analyzer tests
         run: python -m pytest -q tests
