@@ -280,12 +280,13 @@ def _line_chart(
             body.append(
                 f'<rect x="{px}" y="{y1:.1f}" width="{pw}" height="{y0 - y1:.1f}" fill="{color}" fill-opacity="{opacity}"/>'
             )
+    refs_labels: list[tuple[float, float, str, str, str]] = []
     for value, label, color, dash, anchor in refs:
         if ticks[0] <= value <= ticks[-1]:
             y = y_of(value)
             body.append(_hline(y, color, dash))
             lx = px + 26 if anchor == "start" else px + pw - 4
-            body.append(_text(lx, y - 4, label, color, 10.5, anchor))
+            refs_labels.append((lx, y - 4, label, color, anchor))
     for k, _name, color, width, dash in lines:
         d = _path(t, series.get(k) or [], x_of, y_of)
         if d:
@@ -304,6 +305,15 @@ def _line_chart(
             dx = -7 if anchor == "end" else 7
             body.append(f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="3" fill="{FG}"/>')
             body.append(_text(cx + dx, cy - 6 if use_max else cy + 14, label_of(v, t0 + timedelta(hours=h)), DIM, 10.5, anchor))
+    # Threshold labels go on top of the data, on a panel-coloured backing so they stay readable
+    for lx, ly, label, color, anchor in refs_labels:
+        width = len(label) * 6.4 + 6
+        rx = lx - 3 if anchor == "start" else lx - width + 3
+        body.append(
+            f'<rect x="{rx:.1f}" y="{ly - 10:.1f}" width="{width:.1f}" height="13" rx="2" '
+            f'fill="{PANEL}" fill-opacity="0.85"/>'
+        )
+        body.append(_text(lx, ly, label, color, 10.5, anchor))
     for note in _notes(series, key):
         if "t" in note:
             nx = x_of(note["t"])

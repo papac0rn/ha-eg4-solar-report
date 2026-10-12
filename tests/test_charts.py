@@ -5,6 +5,7 @@ Set EG4_CHART_OUT=<folder> to also write the SVGs there for a visual check.
 from __future__ import annotations
 
 import importlib.util
+import sys
 import math
 import os
 from pathlib import Path
@@ -13,6 +14,7 @@ import xml.etree.ElementTree as ET
 _PATH = Path(__file__).parents[1] / "custom_components" / "eg4_solar_report" / "charts.py"
 _spec = importlib.util.spec_from_file_location("eg4_charts", _PATH)
 charts = importlib.util.module_from_spec(_spec)
+sys.modules[_spec.name] = charts  # dataclasses need the module registered
 _spec.loader.exec_module(charts)
 
 SETTINGS = {"hv_watch": 254, "hv_act": 264, "output_ceiling_kw": 16, "cell_v_max": 3.65}

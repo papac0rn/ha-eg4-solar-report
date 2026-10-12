@@ -219,7 +219,7 @@ class ReportManager:
                     analyzer.build_report, exports, settings, start, end
                 )
                 rendered = await self.hass.async_add_executor_job(
-                    charts.render_all, report.get("series"), settings
+                    charts.render_all, report.pop("_chart_series", report.get("series")), settings
                 )
             except Exception as err:  # noqa: BLE001 - any failure becomes the red error state
                 if isinstance(err, (Eg4Error, analyzer.AnalyzerError)):
