@@ -162,6 +162,28 @@ class Eg4SolarReportConfigFlow(ConfigFlow, domain=DOMAIN):
         self._data.update(account)
         return None
 
+    def _explain_rejection(self, typed: dict[str, Any]) -> str:
+        """When EG4 Web Monitor's account signs in fine, say how the typed one differs. Never shows either login."""
+        entries = self.hass.config_entries.async_entries(EG4_WEB_MONITOR_DOMAIN)
+        stored = entries[0].data if entries else {}
+        user, password = stored.get(CONF_USERNAME), stored.get(CONF_PASSWORD)
+        if not user or not password:
+            return "invalid_auth"
+        typed_user = str(typed.get(CONF_USERNAME, ""))
+        if typed_user.strip() != user:
+            same_but_case = typed_user.strip().casefold() == user.strip().casefold()
+            _LOGGER.warning("Typed EG4 username differs from EG4 Web Monitor's (%s)",
+                            "only in capital letters or spaces" if same_but_case else "a different name")
+            return "username_case" if same_but_case else "username_differs"
+        if typed.get(CONF_PASSWORD) != password:
+            typed_pw = str(typed.get(CONF_PASSWORD, ""))
+            close = typed_pw.strip() == password.strip() or typed_pw.casefold() == password.casefold()
+            _LOGGER.warning("Typed EG4 password differs from EG4 Web Monitor's (%s)",
+                            "only in capitals or spaces" if close else "different")
+            return "password_case" if close else "password_differs"
+        _LOGGER.warning("Typed EG4 login matches EG4 Web Monitor's but was rejected; the server choice may differ")
+        return "same_login_rejected"
+
     async def async_step_reuse_web_monitor(self, user_input: dict[str, Any] | None = None):
         """Use the account the EG4 Web Monitor integration already signs in with, so nobody retypes it."""
         source = self.hass.config_entries.async_entries(EG4_WEB_MONITOR_DOMAIN)[0].data
@@ -184,7 +206,7 @@ class Eg4SolarReportConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {"base": error} if error else {}
         if user_input is not None:
             if err := await self._async_try_account(user_input):
-                errors["base"] = err
+                errors["base"] = self._explain_rejection(user_input) if err == "invalid_auth" else err
             else:
                 return await self.async_step_plant()
 
@@ -198,9 +220,12 @@ class Eg4SolarReportConfigFlow(ConfigFlow, domain=DOMAIN):
                             mode=SelectSelectorMode.DROPDOWN,
                         )
                     ),
-                    vol.Required(CONF_USERNAME): str,
+                    # The autocomplete hints stop phone keyboards capitalising or autocorrecting the login
+                    vol.Required(CONF_USERNAME): TextSelector(
+                        TextSelectorConfig(type=TextSelectorType.TEXT, autocomplete="username")
+                    ),
                     vol.Required(CONF_PASSWORD): TextSelector(
-                        TextSelectorConfig(type=TextSelectorType.PASSWORD)
+                        TextSelectorConfig(type=TextSelectorType.PASSWORD, autocomplete="current-password")
                     ),
                 }
             ),
