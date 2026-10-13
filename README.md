@@ -45,8 +45,8 @@ password you use for the [EG4 Monitor Center](https://monitor.eg4electronics.com
 5. **Sign in** with your EG4 Monitor Center email and password, then click through the screens. Most answers are
    filled in for you. See the [Setup Guide](https://github.com/papac0rn/ha-eg4-solar-report/wiki/Setup-Guide) for
    what each one means.
-6. **Make the dashboard.** Settings → Devices & services → EG4 Solar Report → your station → press **Create Dashboard**.
-   A **Solar Report** page appears in the sidebar.
+6. **Pick where the report goes.** The last screen asks: a new **Solar Report** dashboard in the sidebar, or a tab on a
+   dashboard you already have. A notification tells you where it went.
 7. **Run your first report.** On that page, press **Generate Report**. It takes about half a minute.
 
 Step-by-step pictures and answers to common problems are in the **[wiki](https://github.com/papac0rn/ha-eg4-solar-report/wiki)**.
