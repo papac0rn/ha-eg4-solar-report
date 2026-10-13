@@ -101,6 +101,9 @@ See the [Dashboard Guide](https://github.com/papac0rn/ha-eg4-solar-report/wiki/D
 
 - [pylxpweb](https://github.com/joyfulhouse/pylxpweb) by joyfulhouse, for the Monitor Center client, the export
   parser and the fault and warning code names
+- [EG4 Web Monitor](https://github.com/joyfulhouse/eg4_web_monitor) by joyfulhouse. When it's installed, this report reads
+  your battery size, pack count and SOC floor from its sensors, and can sign in with its EG4 account. If you use EG4 with
+  Home Assistant, you probably want it too.
 - Built with [Claude Code](https://claude.com/claude-code)
 
 ## License
