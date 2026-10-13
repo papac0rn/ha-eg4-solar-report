@@ -199,7 +199,7 @@ class ReportManager:
             "soc_floor": ha_eg4.soc_floor(self.hass, data[CONF_INVERTERS][0]),
             "temp_imbalance": opts.get(OPT_TEMP_IMBALANCE),
             "temp_unit": opts.get(OPT_TEMP_UNIT)
-            or ("F" if self.hass.config.units.temperature_unit == UnitOfTemperature.FAHRENHEIT else "C"),
+            or ("f" if self.hass.config.units.temperature_unit == UnitOfTemperature.FAHRENHEIT else "c"),
             **{
                 f"temp_{cls}_{level}": opts.get(f"temp_{cls}_{level}")
                 for cls in TEMP_THRESHOLDS

@@ -382,7 +382,7 @@ class Eg4SolarReportConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 def _default_unit(hass) -> str:
-    return "F" if hass.config.units.temperature_unit == UnitOfTemperature.FAHRENHEIT else "C"
+    return "f" if hass.config.units.temperature_unit == UnitOfTemperature.FAHRENHEIT else "c"
 
 
 def _to_unit(c_value: float, unit: str) -> float:
@@ -436,13 +436,13 @@ class Eg4SolarReportOptionsFlow(OptionsFlow):
         schema[vol.Required(CONF_PACK_COUNT, default=opts.get(CONF_PACK_COUNT, data.get(CONF_PACK_COUNT, DEFAULT_PACK_COUNT)))] = _number(1, 64, 1)
         schema[vol.Required(CONF_PACK_DISCHARGE_A, default=opts.get(CONF_PACK_DISCHARGE_A, data.get(CONF_PACK_DISCHARGE_A, 0)))] = _number(0, 1000, 1, "A")
         schema[vol.Required(OPT_TEMP_UNIT, default=opts.get(OPT_TEMP_UNIT, _default_unit(self.hass)))] = SelectSelector(
-            SelectSelectorConfig(options=["F", "C"], translation_key="temp_unit", mode=SelectSelectorMode.LIST)
+            SelectSelectorConfig(options=["f", "c"], translation_key="temp_unit", mode=SelectSelectorMode.LIST)
         )
         return self.async_show_form(step_id="init", data_schema=vol.Schema(schema))
 
     async def async_step_temperatures(self, user_input: dict[str, Any] | None = None):
         """Thresholds shown and entered in the chosen unit; stored in °C."""
-        unit = self._opts.get(OPT_TEMP_UNIT, "C")
+        unit = str(self._opts.get(OPT_TEMP_UNIT, "c")).upper()
         if user_input is not None:
             stored = {
                 k: (round(v * 5 / 9, 1) if k == OPT_TEMP_IMBALANCE and unit == "F" else

@@ -172,8 +172,8 @@
     },
     "temp_unit": {
       "options": {
-        "F": "Fahrenheit (°F)",
-        "C": "Celsius (°C)"
+        "f": "Fahrenheit (°F)",
+        "c": "Celsius (°C)"
       }
     }
   },
