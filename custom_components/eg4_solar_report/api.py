@@ -37,7 +37,8 @@ class Eg4MonitorClient:
     def __init__(
         self, session: aiohttp.ClientSession, base_url: str, username: str, password: str
     ) -> None:
-        self._client = LuxpowerClient(username, password, base_url=base_url, session=session)
+        # Stray spaces from copy-paste are a common cause of a rejected login
+        self._client = LuxpowerClient(username.strip(), password, base_url=base_url, session=session)
 
     async def async_login(self) -> None:
         try:
@@ -45,6 +46,9 @@ class Eg4MonitorClient:
         except LuxpowerAuthError as err:
             raise Eg4AuthError(str(err) or "Login rejected") from err
         except LuxpowerError as err:
+            # A bad login comes back as HTTP 200 with a LOGIN_ERROR_* code, which pylxpweb reports as an API error
+            if "LOGIN_ERROR" in str(err):
+                raise Eg4AuthError(str(err)) from err
             raise Eg4Error(str(err)) from err
 
     async def async_get_plants(self) -> list[dict[str, Any]]:

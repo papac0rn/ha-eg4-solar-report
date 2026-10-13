@@ -81,7 +81,7 @@
       }
     },
     "error": {
-      "invalid_auth": "The Monitor Center rejected that username or password.",
+      "invalid_auth": "The Monitor Center rejected that username or password. Use your Monitor Center account name, which may not be your email (it is the same one the EG4 Web Monitor integration uses).",
       "cannot_connect": "Could not reach the Monitor Center. Check the server and try again.",
       "no_plants": "This account has no stations.",
       "no_inverters": "No inverters were found on this station.",
