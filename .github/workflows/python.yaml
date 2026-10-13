@@ -28,6 +28,6 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install test dependencies
-        run: pip install pytest "xlrd>=2.0.1" "pylxpweb${{ matrix.pylxpweb }}"
+        run: pip install pytest jinja2 "xlrd>=2.0.1" "pylxpweb${{ matrix.pylxpweb }}"
       - name: Run analyzer tests
         run: python -m pytest -q tests
