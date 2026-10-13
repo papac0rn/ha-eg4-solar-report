@@ -1,7 +1,7 @@
-"""Default "Solar Report" dashboard, built by the Create Dashboard button.
+"""The "Solar Report" dashboard view.
 
-Built-in cards only (markdown, entities, picture-entity), so it works without any custom card. The layout follows the
-report: verdict first, then the stat grid, alarms, temperatures, day-by-day table, findings, charts, actions and checks.
+One full-width view holding the integration's own report card (frontend/eg4-solar-report-card.js, loaded by the
+integration itself). _cards() keeps a built-in-cards version of the layout for the Dashboard Guide and tests.
 """
 from __future__ import annotations
 
@@ -116,10 +116,11 @@ VIEW_PATH = "solar-report"
 
 
 def build_view(registry: er.EntityRegistry, entry_id: str, title: str) -> dict[str, Any]:
-    """The report as one dashboard view (tab), used for its own dashboard or added to an existing one."""
+    """The report as one full-width tab, drawn by the integration's own report card."""
     return {
         "title": title,
         "path": VIEW_PATH,
         "icon": "mdi:solar-power-variant",
-        "cards": _cards(registry, entry_id),
+        "panel": True,
+        "cards": [{"type": "custom:eg4-solar-report-card", "entity": _eid(registry, entry_id, "sensor", "report")}],
     }

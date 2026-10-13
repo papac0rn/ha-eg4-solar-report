@@ -26,7 +26,28 @@ GENERATE_SCHEMA = vol.Schema(
 )
 
 
+CARD_URL = "/eg4_solar_report_static"
+
+
+async def _async_register_card(hass: HomeAssistant) -> None:
+    """Serve the report card and load it in every browser, so no HACS frontend install is needed."""
+    if hass.data.get(f"{DOMAIN}_card"):
+        return
+    hass.data[f"{DOMAIN}_card"] = True
+    from pathlib import Path
+
+    from homeassistant.components import frontend
+    from homeassistant.components.http import StaticPathConfig
+    from homeassistant.loader import async_get_integration
+
+    folder = Path(__file__).parent / "frontend"
+    await hass.http.async_register_static_paths([StaticPathConfig(CARD_URL, str(folder), False)])
+    version = (await async_get_integration(hass, DOMAIN)).version
+    frontend.add_extra_js_url(hass, f"{CARD_URL}/eg4-solar-report-card.js?v={version}")
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    await _async_register_card(hass)
     manager = ReportManager(hass, entry)
     await manager.async_load()
     hass.data.setdefault(DOMAIN, {})

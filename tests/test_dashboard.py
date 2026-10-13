@@ -19,24 +19,28 @@ class _Registry:
 
 
 def _render_all(report: dict | None, state: str) -> list[str]:
-    config = dashboard.build_dashboard(_Registry(), "entry", "Solar Report · Station")
+    cards = dashboard._cards(_Registry(), "entry")
     env = jinja2.Environment()
     env.globals["states"] = lambda _eid: state
     env.globals["state_attr"] = lambda _eid, key: (report or {}).get(key)
     out = []
-    for card in config["views"][0]["cards"]:
+    for card in cards:
         if card["type"] == "markdown":
             out.append(env.from_string(card["content"]).render())
     return out
 
 
-def test_layout_and_entities():
-    config = dashboard.build_dashboard(_Registry(), "entry", "Solar Report · Station")
-    cards = config["views"][0]["cards"]
+def test_view_is_one_full_width_report_card():
+    view = dashboard.build_dashboard(_Registry(), "entry", "Solar Report · Station")["views"][0]
+    assert view["panel"] is True and view["path"] == "solar-report"
+    assert view["cards"] == [{"type": "custom:eg4-solar-report-card", "entity": "sensor.station_report"}]
+
+
+def test_built_in_cards_layout():
+    cards = dashboard._cards(_Registry(), "entry")
     assert cards[0]["type"] == "markdown"  # verdict first
     images = [c["entity"] for c in cards if c["type"] == "picture-entity"]
     assert len(images) == 7 and images[0] == "image.station_chart_harvest"
-    assert "sensor.station_report" in cards[0]["content"]
 
 
 def test_cards_render_with_a_report():
