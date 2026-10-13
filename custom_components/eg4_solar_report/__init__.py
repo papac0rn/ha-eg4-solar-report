@@ -43,7 +43,31 @@ async def _async_register_card(hass: HomeAssistant) -> None:
     folder = Path(__file__).parent / "frontend"
     await hass.http.async_register_static_paths([StaticPathConfig(CARD_URL, str(folder), False)])
     version = (await async_get_integration(hass, DOMAIN)).version
-    frontend.add_extra_js_url(hass, f"{CARD_URL}/eg4-solar-report-card.js?v={version}")
+    url = f"{CARD_URL}/eg4-solar-report-card.js?v={version}"
+    frontend.add_extra_js_url(hass, url)
+    # Also list it as a dashboard resource. Dashboards wait for their resources before drawing cards, so the
+    # card is always defined in time (the extra script alone can lose that race on a slow phone).
+    try:
+        await _async_ensure_resource(hass, url)
+    except Exception as err:  # noqa: BLE001 - the extra script still loads the card
+        _LOGGER.debug("Could not add the report card as a dashboard resource: %s", err)
+
+
+async def _async_ensure_resource(hass: HomeAssistant, url: str) -> None:
+    lovelace = hass.data.get("lovelace")
+    resources = getattr(lovelace, "resources", None)
+    if resources is None or not hasattr(resources, "async_create_item"):
+        return  # YAML-mode resources are managed by the owner
+    if not resources.loaded:
+        await resources.async_load()
+        resources.loaded = True
+    base = url.split("?")[0]
+    for item in resources.async_items():
+        if str(item.get("url", "")).split("?")[0] == base:
+            if item["url"] != url:
+                await resources.async_update_item(item["id"], {"res_type": "module", "url": url})
+            return
+    await resources.async_create_item({"res_type": "module", "url": url})
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
