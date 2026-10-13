@@ -95,7 +95,7 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
-def _number(min_v: float, max_v: float, step: float, unit: str | None = None) -> NumberSelector:
+def _number(min_v: float, max_v: float, step: float | str, unit: str | None = None) -> NumberSelector:
     config = NumberSelectorConfig(min=min_v, max=max_v, step=step, mode=NumberSelectorMode.BOX)
     # The selector rejects unit_of_measurement=None, so only pass a real unit
     if unit:
@@ -387,8 +387,8 @@ class Eg4SolarReportConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="grid",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_IMPORT_RATE, default=0.12): _number(0, 5, 0.0001, "$/kWh"),
-                    vol.Required(CONF_EXPORT_CREDIT, default=0.0): _number(0, 5, 0.0001, "$/kWh"),
+                    vol.Required(CONF_IMPORT_RATE, default=0.12): _number(0, 5, "any", "$/kWh"),
+                    vol.Required(CONF_EXPORT_CREDIT, default=0.0): _number(0, 5, "any", "$/kWh"),
                     vol.Required(CONF_SERVICE_CHARGE, default=0.0): _number(0, 1000, 0.01, "$/month"),
                     vol.Optional(CONF_UTILITY_NAME): str,
                     vol.Required(CONF_NOMINAL_VOLTAGE, default=DEFAULT_NOMINAL_VOLTAGE): _number(100, 480, 1, "V"),
