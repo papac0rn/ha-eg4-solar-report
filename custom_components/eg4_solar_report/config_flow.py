@@ -96,11 +96,11 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _number(min_v: float, max_v: float, step: float, unit: str | None = None) -> NumberSelector:
-    return NumberSelector(
-        NumberSelectorConfig(
-            min=min_v, max=max_v, step=step, unit_of_measurement=unit, mode=NumberSelectorMode.BOX
-        )
-    )
+    config = NumberSelectorConfig(min=min_v, max=max_v, step=step, mode=NumberSelectorMode.BOX)
+    # The selector rejects unit_of_measurement=None, so only pass a real unit
+    if unit:
+        config["unit_of_measurement"] = unit
+    return NumberSelector(config)
 
 
 def _split_csv(value: str) -> list[str]:
