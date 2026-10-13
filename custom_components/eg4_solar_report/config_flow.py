@@ -28,6 +28,7 @@ from homeassistant.helpers.selector import (
 
 from . import ha_eg4
 from .api import Eg4AuthError, Eg4Error, Eg4MonitorClient
+from .button import TARGET_NEW, TARGET_NONE, dashboard_choices
 from .const import (
     CONF_ARRAY_NAMES,
     CONF_BATTERY_KWH,
@@ -68,6 +69,7 @@ from .const import (
     DOMAIN,
     EMPTY_PROFILE,
     OPT_KNOWN_ISSUES,
+    OPT_REPORT_LOCATION,
     OPT_NOTIFY_SERVICE,
     OPT_NOTIFY_SEVERITIES,
     OPT_OUTAGE_DELAY,
@@ -101,6 +103,13 @@ def _number(min_v: float, max_v: float, step: float | str, unit: str | None = No
     if unit:
         config["unit_of_measurement"] = unit
     return NumberSelector(config)
+
+
+def _location_selector(hass) -> SelectSelector:
+    options = [SelectOptionDict(value=TARGET_NEW, label="A new Solar Report dashboard in the sidebar")]
+    options += [SelectOptionDict(value=value, label=label) for value, label in dashboard_choices(hass)]
+    options.append(SelectOptionDict(value=TARGET_NONE, label="Don't add it to a dashboard"))
+    return SelectSelector(SelectSelectorConfig(options=options, mode=SelectSelectorMode.LIST))
 
 
 def _split_csv(value: str) -> list[str]:
@@ -381,7 +390,7 @@ class Eg4SolarReportConfigFlow(ConfigFlow, domain=DOMAIN):
         """Step 5: grid and rates."""
         if user_input is not None:
             self._data.update(user_input)
-            return self.async_create_entry(title=self._data[CONF_PLANT_NAME], data=self._data)
+            return await self.async_step_location()
 
         return self.async_show_form(
             step_id="grid",
@@ -397,6 +406,16 @@ class Eg4SolarReportConfigFlow(ConfigFlow, domain=DOMAIN):
                 }
             ),
         )
+    async def async_step_location(self, user_input: dict[str, Any] | None = None):
+        """Last step: where the report goes. A new dashboard, a tab on an existing one, or nowhere."""
+        if user_input is not None:
+            self._data[OPT_REPORT_LOCATION] = user_input[OPT_REPORT_LOCATION]
+            return self.async_create_entry(title=self._data[CONF_PLANT_NAME], data=self._data)
+        return self.async_show_form(
+            step_id="location",
+            data_schema=vol.Schema({vol.Required(OPT_REPORT_LOCATION, default=TARGET_NEW): _location_selector(self.hass)}),
+        )
+
     async def async_step_reauth(self, entry_data: dict[str, Any]):
         return await self.async_step_reauth_confirm()
 
@@ -492,6 +511,7 @@ class Eg4SolarReportOptionsFlow(OptionsFlow):
         schema[vol.Required(CONF_BATTERY_KWH, default=opts.get(CONF_BATTERY_KWH, data.get(CONF_BATTERY_KWH, 0)))] = _number(0, 1000, 0.1, "kWh")
         schema[vol.Required(CONF_PACK_COUNT, default=opts.get(CONF_PACK_COUNT, data.get(CONF_PACK_COUNT, DEFAULT_PACK_COUNT)))] = _number(1, 64, 1)
         schema[vol.Required(CONF_PACK_DISCHARGE_A, default=opts.get(CONF_PACK_DISCHARGE_A, data.get(CONF_PACK_DISCHARGE_A, 0)))] = _number(0, 1000, 1, "A")
+        schema[vol.Required(OPT_REPORT_LOCATION, default=opts.get(OPT_REPORT_LOCATION, data.get(OPT_REPORT_LOCATION, TARGET_NEW)))] = _location_selector(self.hass)
         schema[vol.Required(OPT_TEMP_UNIT, default=opts.get(OPT_TEMP_UNIT, _default_unit(self.hass)))] = SelectSelector(
             SelectSelectorConfig(options=["f", "c"], translation_key="temp_unit", mode=SelectSelectorMode.LIST)
         )

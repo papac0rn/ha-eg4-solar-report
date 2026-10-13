@@ -86,6 +86,13 @@
           "reuse_web_monitor": "Use my EG4 Web Monitor account",
           "manual": "Enter a username and password"
         }
+      },
+      "location": {
+        "title": "Where should the report go?",
+        "description": "The report is a page of cards: verdict, findings, charts and tables. Put it on its own dashboard, or add it as a tab to a dashboard you already use. You can change this later under Configure.",
+        "data": {
+          "report_location": "Report location"
+        }
       }
     },
     "error": {
@@ -124,7 +131,8 @@
           "battery_kwh": "Usable battery capacity",
           "pack_count": "Number of battery packs",
           "pack_discharge_a": "Discharge limit per pack",
-          "temp_unit": "Temperature unit"
+          "temp_unit": "Temperature unit",
+          "report_location": "Report location"
         },
         "data_description": {
           "weekly_day": "The weekly report covers the 7 days ending on this day.",
@@ -134,7 +142,8 @@
           "known_issues": "Comma-separated finding IDs to report as Info instead of Watch or Act.",
           "battery_kwh": "Found at setup from the EG4 integration or the battery itself. 0 works it out from the log.",
           "pack_discharge_a": "0 learns it from the log (the highest limit seen, divided by the pack count).",
-          "temp_unit": "Used for every temperature in the report and its chart."
+          "temp_unit": "Used for every temperature in the report and its chart.",
+          "report_location": "Where the report page goes. Changing it adds the report there; it doesn't remove it from the old place."
         }
       },
       "temperatures": {

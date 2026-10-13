@@ -4,6 +4,7 @@ import logging
 
 import voluptuous as vol
 
+from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ServiceValidationError
@@ -34,17 +35,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     manager.async_start()
 
-    # First setup: make the Solar Report dashboard so nobody has to find the button. Only once, so a
-    # dashboard the owner deleted isn't brought back.
-    if not entry.data.get("dashboard_created"):
-        from .button import async_create_dashboard
+    # Put the report where the owner chose (a new dashboard by default). Done when the choice changes,
+    # not on every restart, so a dashboard or tab the owner removed isn't brought back.
+    from .button import async_place_report, report_location
 
+    target = report_location(entry)
+    if entry.data.get("report_placed_at") != target:
         try:
-            await async_create_dashboard(hass, entry)
+            where = await async_place_report(hass, entry, target)
         except Exception as err:  # noqa: BLE001 - setup must not fail over the dashboard
-            _LOGGER.warning("Could not create the Solar Report dashboard: %s", err)
+            _LOGGER.warning("Could not add the Solar Report to the chosen dashboard: %s", err)
+            persistent_notification.async_create(
+                hass, f"EG4 Solar Report couldn't add the report to the dashboard you picked: {err}",
+                title="EG4 Solar Report", notification_id=f"{DOMAIN}_placement",
+            )
         else:
-            hass.config_entries.async_update_entry(entry, data={**entry.data, "dashboard_created": True})
+            hass.config_entries.async_update_entry(entry, data={**entry.data, "report_placed_at": target})
+            if target != "none":
+                persistent_notification.async_create(
+                    hass, f"Your report is on {where}. Press **Generate Report** there to run it.",
+                    title="EG4 Solar Report is ready", notification_id=f"{DOMAIN}_placement",
+                )
+
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
 
     if not hass.services.has_service(DOMAIN, SERVICE_GENERATE):

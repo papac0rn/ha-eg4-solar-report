@@ -28,6 +28,10 @@ def _md(content: str, title: str | None = None) -> dict[str, Any]:
 
 
 def build_dashboard(registry: er.EntityRegistry, entry_id: str, title: str) -> dict[str, Any]:
+    return {"views": [build_view(registry, entry_id, title)]}
+
+
+def _cards(registry: er.EntityRegistry, entry_id: str) -> list[dict[str, Any]]:
     report = _eid(registry, entry_id, "sensor", "report")
     a = f"state_attr('{report}', "
 
@@ -105,13 +109,17 @@ def build_dashboard(registry: er.EntityRegistry, entry_id: str, title: str) -> d
          "name": TITLES[key], "show_name": False, "show_state": False}
         for key in CHARTS
     ]
+    return [verdict, controls, stats, alarms, temps, daily, findings, *charts, actions, checks]
+
+
+VIEW_PATH = "solar-report"
+
+
+def build_view(registry: er.EntityRegistry, entry_id: str, title: str) -> dict[str, Any]:
+    """The report as one dashboard view (tab), used for its own dashboard or added to an existing one."""
     return {
-        "views": [
-            {
-                "title": title,
-                "path": "report",
-                "icon": "mdi:solar-power-variant",
-                "cards": [verdict, controls, stats, alarms, temps, daily, findings, *charts, actions, checks],
-            }
-        ]
+        "title": title,
+        "path": VIEW_PATH,
+        "icon": "mdi:solar-power-variant",
+        "cards": _cards(registry, entry_id),
     }
