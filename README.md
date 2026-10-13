@@ -2,6 +2,7 @@
 
 [![Open your Home Assistant instance and open this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=papac0rn&repository=ha-eg4-solar-report&category=integration)
 [![Open your Home Assistant instance and start setting up EG4 Solar Report.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=eg4_solar_report)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-papac0rn-orange?logo=buy-me-a-coffee)](https://buymeacoffee.com/papac0rn)
 
 **Is my solar system healthy?** This integration answers that in plain English.
 
@@ -109,6 +110,10 @@ See the [Dashboard Guide](https://github.com/papac0rn/ha-eg4-solar-report/wiki/D
   your battery size, pack count and SOC floor from its sensors, and can sign in with its EG4 account. If you use EG4 with
   Home Assistant, you probably want it too.
 - Built with [Claude Code](https://claude.com/claude-code)
+
+## Support
+
+If the report saves you a headache, you can [buy me a coffee](https://buymeacoffee.com/papac0rn).
 
 ## License
 
