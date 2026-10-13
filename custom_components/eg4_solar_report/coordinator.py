@@ -60,6 +60,7 @@ from .const import (
     OPT_TEMP_IMBALANCE,
     OPT_TEMP_UNIT,
     SERVERS,
+    base_url_for,
     SEVERITY_ACT,
     VERDICT_ERROR,
     WEEKDAYS,
@@ -76,7 +77,7 @@ class ReportManager:
         self.entry = entry
         self.client = Eg4MonitorClient(
             async_create_clientsession(hass),
-            SERVERS[entry.data[CONF_SERVER]],
+            base_url_for(entry.data),
             entry.data[CONF_USERNAME],
             entry.data[CONF_PASSWORD],
         )

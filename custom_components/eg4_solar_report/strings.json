@@ -1,15 +1,6 @@
 {
   "config": {
     "step": {
-      "user": {
-        "title": "EG4 Monitor Center account",
-        "description": "Sign in with the account you use for the EG4 Monitor Center website. This is unofficial access and is not affiliated with EG4. Your login is stored only in Home Assistant.",
-        "data": {
-          "server": "Server",
-          "username": "Username",
-          "password": "Password"
-        }
-      },
       "plant": {
         "title": "Choose your station",
         "data": {
@@ -78,6 +69,23 @@
         "data": {
           "password": "Password"
         }
+      },
+      "manual": {
+        "title": "EG4 Monitor Center account",
+        "description": "Sign in with the account you use for the EG4 Monitor Center website. This is unofficial access and is not affiliated with EG4. Your login is stored only in Home Assistant.",
+        "data": {
+          "server": "Server",
+          "username": "Username",
+          "password": "Password"
+        }
+      },
+      "user": {
+        "title": "EG4 Monitor Center account",
+        "description": "You already have the EG4 Web Monitor integration. This report can sign in with the same EG4 account, so you don't have to type it again.",
+        "menu_options": {
+          "reuse_web_monitor": "Use my EG4 Web Monitor account",
+          "manual": "Enter a username and password"
+        }
       }
     },
     "error": {
@@ -86,7 +94,8 @@
       "no_plants": "This account has no stations.",
       "no_inverters": "No inverters were found on this station.",
       "no_arrays": "Enter at least one array name.",
-      "bad_mppt_limits": "Enter one number per array, in the same order as the names."
+      "bad_mppt_limits": "Enter one number per array, in the same order as the names.",
+      "web_monitor_no_login": "The EG4 Web Monitor integration has no cloud login to share (it may be set up for a local connection). Enter your account below."
     },
     "abort": {
       "already_configured": "This station is already set up.",

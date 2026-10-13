@@ -77,6 +77,9 @@ from .const import (
     OPT_WEEKLY_ENABLED,
     OPT_WEEKLY_TIME,
     SERVERS,
+    base_url_for,
+    EG4_WEB_MONITOR_DOMAIN,
+    CONF_BASE_URL,
     SEVERITY_ACT,
     SEVERITY_INFO,
     SEVERITY_WATCH,
@@ -131,33 +134,62 @@ class Eg4SolarReportConfigFlow(ConfigFlow, domain=DOMAIN):
         self._battery: dict[str, Any] | None = None
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
-        """Step 1: Monitor Center account."""
-        errors: dict[str, str] = {}
+        """Step 1: the Monitor Center account. Offer the EG4 Web Monitor login when that integration is set up."""
+        if self.hass.config_entries.async_entries(EG4_WEB_MONITOR_DOMAIN):
+            return self.async_show_menu(step_id="user", menu_options=["reuse_web_monitor", "manual"])
+        return await self.async_step_manual()
+
+    async def _async_try_account(self, account: dict[str, Any]) -> str | None:
+        """Sign in and list stations; returns an error key, or None when it worked."""
+        client = Eg4MonitorClient(
+            async_create_clientsession(self.hass),
+            base_url_for(account),
+            account[CONF_USERNAME],
+            account[CONF_PASSWORD],
+        )
+        try:
+            await client.async_login()
+            self._plants = await client.async_get_plants()
+        except Eg4AuthError as err:
+            _LOGGER.warning("EG4 Monitor Center rejected the login: %s", err)
+            return "invalid_auth"
+        except Eg4Error as err:
+            _LOGGER.warning("EG4 Monitor Center login failed: %s", err)
+            return "cannot_connect"
+        if not self._plants:
+            return "no_plants"
+        self._client = client
+        self._data.update(account)
+        return None
+
+    async def async_step_reuse_web_monitor(self, user_input: dict[str, Any] | None = None):
+        """Use the account the EG4 Web Monitor integration already signs in with, so nobody retypes it."""
+        source = self.hass.config_entries.async_entries(EG4_WEB_MONITOR_DOMAIN)[0].data
+        if not source.get(CONF_USERNAME) or not source.get(CONF_PASSWORD):
+            return await self.async_step_manual(error="web_monitor_no_login")
+        account = {
+            CONF_SERVER: DEFAULT_SERVER,
+            CONF_USERNAME: source[CONF_USERNAME],
+            CONF_PASSWORD: source[CONF_PASSWORD],
+        }
+        if source.get(CONF_BASE_URL):
+            account[CONF_BASE_URL] = source[CONF_BASE_URL]
+        error = await self._async_try_account(account)
+        if error:
+            return await self.async_step_manual(error=error)
+        return await self.async_step_plant()
+
+    async def async_step_manual(self, user_input: dict[str, Any] | None = None, error: str | None = None):
+        """Type the Monitor Center account in."""
+        errors: dict[str, str] = {"base": error} if error else {}
         if user_input is not None:
-            client = Eg4MonitorClient(
-                async_create_clientsession(self.hass),
-                SERVERS[user_input[CONF_SERVER]],
-                user_input[CONF_USERNAME],
-                user_input[CONF_PASSWORD],
-            )
-            try:
-                await client.async_login()
-                self._plants = await client.async_get_plants()
-            except Eg4AuthError:
-                errors["base"] = "invalid_auth"
-            except Eg4Error as err:
-                _LOGGER.warning("EG4 Monitor Center login failed: %s", err)
-                errors["base"] = "cannot_connect"
+            if err := await self._async_try_account(user_input):
+                errors["base"] = err
             else:
-                if not self._plants:
-                    errors["base"] = "no_plants"
-                else:
-                    self._client = client
-                    self._data.update(user_input)
-                    return await self.async_step_plant()
+                return await self.async_step_plant()
 
         return self.async_show_form(
-            step_id="user",
+            step_id="manual",
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_SERVER, default=DEFAULT_SERVER): SelectSelector(
@@ -349,7 +381,7 @@ class Eg4SolarReportConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             client = Eg4MonitorClient(
                 async_create_clientsession(self.hass),
-                SERVERS[entry.data[CONF_SERVER]],
+                base_url_for(entry.data),
                 entry.data[CONF_USERNAME],
                 user_input[CONF_PASSWORD],
             )

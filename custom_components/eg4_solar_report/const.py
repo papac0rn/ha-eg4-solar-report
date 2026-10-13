@@ -10,8 +10,15 @@ SERVERS = {
 }
 DEFAULT_SERVER = "us_eg4"
 
+EG4_WEB_MONITOR_DOMAIN = "eg4_web_monitor"
+
+
+def base_url_for(data) -> str:
+    return data.get(CONF_BASE_URL) or SERVERS[data.get(CONF_SERVER, DEFAULT_SERVER)]
+
 # Config entry data
 CONF_SERVER = "server"
+CONF_BASE_URL = "base_url"  # set when the account is reused from EG4 Web Monitor
 CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
 CONF_PLANT_ID = "plant_id"
