@@ -360,8 +360,9 @@ def _build_ctx(log: Log, settings: dict[str, Any], start: date, end: date) -> Ct
 
     # Arrays: one per MPPT input that produced anything, named from settings
     active = [k for k in (1, 2, 3) if any((v or 0) > 0 for v in log.f(f"ePv{k}Day"))] or [1]
-    count = max(active)
     names = list(settings.get("array_names") or [])
+    # The named arrays always show, even before sunrise when none has produced yet
+    count = min(max(max(active), len(names)), 3)
     ctx.array_names = [names[k] if k < len(names) else f"Array {k + 1}" for k in range(count)]
 
     # Day-by-day table (day counters reset at midnight, so each day's value is its maximum)

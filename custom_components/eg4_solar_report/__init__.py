@@ -27,6 +27,7 @@ GENERATE_SCHEMA = vol.Schema(
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     manager = ReportManager(hass, entry)
+    await manager.async_load()
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = manager
 
@@ -63,6 +64,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not hass.data[DOMAIN]:
             hass.services.async_remove(DOMAIN, SERVICE_GENERATE)
     return unload_ok
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Delete the saved report when the integration is removed."""
+    from homeassistant.helpers.storage import Store
+
+    await Store(hass, 1, f"{DOMAIN}.{entry.entry_id}").async_remove()
 
 
 async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:

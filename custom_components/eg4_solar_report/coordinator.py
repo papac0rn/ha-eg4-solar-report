@@ -9,6 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_OFF, STATE_ON, UnitOfTemperature
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.event import (
     async_call_later,
     async_track_state_change_event,
@@ -19,6 +20,7 @@ from homeassistant.util import dt as dt_util
 from . import analyzer, charts, ha_eg4
 from .api import Eg4AuthError, Eg4Error, Eg4MonitorClient
 from .const import (
+    DOMAIN,
     CONF_ARRAY_NAMES,
     CONF_BATTERY_KWH,
     CONF_CELL_V_MAX,
@@ -88,6 +90,8 @@ class ReportManager:
         self.last_generated: datetime | None = None
         self.charts: dict[str, bytes] = charts.render_placeholders()
         self.charts_updated: datetime = dt_util.utcnow()
+        # The last report survives restarts
+        self._store: Store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}")
         self.running = False
         self._lock = asyncio.Lock()
         self._listeners: list[Callable[[], None]] = []
@@ -106,6 +110,28 @@ class ReportManager:
     def _notify_listeners(self) -> None:
         for cb in list(self._listeners):
             cb()
+
+    async def async_load(self) -> None:
+        """Bring back the last report and its charts after a restart."""
+        saved = await self._store.async_load()
+        if not saved:
+            return
+        self.report = saved.get("report")
+        self.period = saved.get("period", self.period)
+        if saved.get("last_generated"):
+            self.last_generated = dt_util.parse_datetime(saved["last_generated"])
+        charts_saved = saved.get("charts") or {}
+        if charts_saved:
+            self.charts = {k: v.encode("utf-8") for k, v in charts_saved.items()}
+            self.charts_updated = dt_util.utcnow()
+
+    async def _async_save(self) -> None:
+        await self._store.async_save({
+            "report": self.report,
+            "period": self.period,
+            "last_generated": self.last_generated.isoformat() if self.last_generated else None,
+            "charts": {k: v.decode("utf-8") for k, v in self.charts.items()},
+        })
 
     @callback
     def async_start(self) -> None:
@@ -253,6 +279,7 @@ class ReportManager:
             self.charts_updated = dt_util.utcnow()
             self.error = None
             self.last_generated = dt_util.now()
+            await self._async_save()
             self.running = False
             self._notify_listeners()
 
