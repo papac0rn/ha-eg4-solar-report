@@ -1493,7 +1493,7 @@ def build_report(
     actions: list[str] = []
     for x in ordered:
         for a in x.actions or ([x.action] if x.action else []):
-            if a and a != "None." and a not in actions:
+            if a and not a.startswith("None") and a not in actions:
                 actions.append(a)
 
     totals = {

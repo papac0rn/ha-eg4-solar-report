@@ -18,5 +18,5 @@
     "pylxpweb>=0.9.38",
     "xlrd>=2.0.1"
   ],
-  "version": "0.1.2"
+  "version": "0.1.3"
 }
