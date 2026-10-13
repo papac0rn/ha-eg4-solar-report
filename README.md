@@ -1,36 +1,60 @@
 # EG4 Solar Report for Home Assistant
 
-> **Pre-release (0.1.0, in development).** The analyzer rules are still being ported. Not ready to install yet.
+[![Open your Home Assistant instance and open this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=papac0rn&repository=ha-eg4-solar-report&category=integration)
+[![Open your Home Assistant instance and start setting up EG4 Solar Report.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=eg4_solar_report)
 
-A Home Assistant custom integration that downloads your EG4 inverter's data from the **EG4 Monitor Center** and analyzes it.
-You get a plain verdict (**healthy / watch / act**) plus a list of findings, for today or for the past 7 days.
+**Is my solar system healthy?** This integration answers that in plain English.
 
-> **Disclaimer:** this uses unofficial access to the EG4 Monitor Center. It is not affiliated with or endorsed by EG4
-> Electronics, and it may break if EG4 changes their site.
+It downloads your EG4 inverter's own log from the **EG4 Monitor Center** (the same data you can export from the
+website), runs **21 checks** on it, and tells you **Healthy**, **Watch** or **Act**, with what it found and what to do
+about it. It works on today or on the last 7 days, runs on a schedule if you want, and can run itself after a power outage.
+
+> **Beta (0.1.0).** Built and tested against real FlexBOSS 21 logs. Other EG4 models should work but haven't been tried
+> yet. Please [open an issue](https://github.com/papac0rn/ha-eg4-solar-report/issues) if something looks wrong.
+
+![Daily harvest by MPPT](images/chart-harvest.svg)
+![Line voltage with the watch and trip thresholds](images/chart-grid_voltage.svg)
+
+## What it tells you
+
+A real example, from a 4-day stretch where one battery pack had dropped offline:
+
+> **ACT.** Needs attention this stretch. 494 kWh harvested, 95.6 % self-supplied, zero faults.
 >
-> **Privacy:** your login is stored only in your Home Assistant config entry. Report data stays in your Home Assistant.
+> - 🔴 **Battery pack offline: 3 of 4 packs.** The discharge limit read 600 A instead of 800 A until 12:49 on Aug 26,
+>   when the missing pack rejoined.
+> - 🔴 **Grid voltage, every sunny day.** Over 254 V for hours each afternoon while exporting, peaking at 260.9 V.
+> - 🟡 **Airflow/fan on heatsink 1.** Overnight, with no solar, heatsink 1 sits 10 °F warmer than the other two.
+> - 🟡 **16 kW AC clipping.** The inverter sat at its output ceiling on sunny afternoons.
 
-## Install (HACS)
+Every report also has a stat grid (harvest per MPPT, house load, export, import, value, battery, grid volts, heatsink),
+an alarm panel, a temperature panel, a day-by-day table, seven charts, and a numbered "What to do" list.
 
-1. HACS → ⋮ → **Custom repositories** → add this repository as an **Integration**.
-2. Install **EG4 Solar Report**, then restart Home Assistant.
-3. **Settings → Devices & services → Add integration → EG4 Solar Report.**
+## Install (about 10 minutes)
 
-## Setup screens
+**You need:** Home Assistant with [HACS](https://hacs.xyz/docs/use/download/download/) installed, and the email and
+password you use for the [EG4 Monitor Center](https://monitor.eg4electronics.com) website.
 
-1. **Account:** server, Monitor Center username and password. These are checked by signing in.
-2. **Station:** chosen automatically if your account has only one.
-3. **System:** which inverters to include, system type (detected), parallel count, GridBOSS.
-4. **Battery:** found automatically. Size and pack count come from the EG4 Web Monitor integration's battery sensors if
-   you have it, otherwise from the battery itself through the Monitor Center (full Ah × 51.2 V). This screen only appears
-   if neither reports it. The per-pack discharge limit is learned from the log.
-5. **Arrays:** a name per MPPT input, plus the MPPT current limits, max PV voltage and AC output ceiling. These are
-   pre-filled for known system types; leave a limit empty or 0 to skip that check.
-6. **Grid and rates:** import rate, export credit, monthly service charge, utility name, nominal grid voltage, and the
-   high-voltage Watch/Act thresholds (default 254 / 264 V).
+1. **Add it to HACS.** Click the **Open your Home Assistant instance** button at the top of this page, then **Add**.
+   <br>(Or in HACS: ⋮ menu → **Custom repositories** → paste `https://github.com/papac0rn/ha-eg4-solar-report`,
+   type **Integration** → **Add**.)
+2. **Download it.** In HACS, open **EG4 Solar Report** → **Download** → **Download**.
+3. **Restart Home Assistant.** Settings → ⋮ (top right) → **Restart Home Assistant**.
+4. **Set it up.** Click the **start setting up** button at the top of this page.
+   <br>(Or Settings → Devices & services → **+ Add integration** → search **EG4 Solar Report**.)
+5. **Sign in** with your EG4 Monitor Center email and password, then click through the screens. Most answers are
+   filled in for you. See the [Setup Guide](https://github.com/papac0rn/ha-eg4-solar-report/wiki/Setup-Guide) for
+   what each one means.
+6. **Make the dashboard.** Settings → Devices & services → EG4 Solar Report → your station → press **Create Dashboard**.
+   A **Solar Report** page appears in the sidebar.
+7. **Run your first report.** On that page, press **Generate Report**. It takes about half a minute.
 
-**Configure** (later): temperature unit (°F or °C, defaulting to your Home Assistant units), temperature thresholds, the battery facts found at setup, weekly report day and time, a report after a grid outage (with a delay so EG4's cloud catches up),
-a notify service with which severities to push, and known issues to report as Info.
+Step-by-step pictures and answers to common problems are in the **[wiki](https://github.com/papac0rn/ha-eg4-solar-report/wiki)**.
+
+## Already have the EG4 Web Monitor integration?
+
+Good: keep it. The two work together. This one reads your battery size, pack count and SOC floor straight from that
+integration's sensors, and both use the same `pylxpweb` library at compatible versions.
 
 ## The 21 checks
 
@@ -44,55 +68,40 @@ Each check is rated **OK**, **Info** (worth knowing), **Watch** (keep an eye on 
 | Arrays | Array balance (weather vs. array problem) |
 | Data | Logger gaps · Energy counter cross-check |
 
-The report only sees what the inverter logs. Thresholds such as the 264 V trip point are typical values, so confirm
-them against your own inverter settings.
+Fault and warning codes are decoded into plain language and judged **one-off** (cleared on its own, often during a grid
+blip) or **repeating**. Codes it doesn't know are flagged Watch, never ignored. Details are on the
+[Checks Explained](https://github.com/papac0rn/ha-eg4-solar-report/wiki/Checks-Explained) wiki page.
 
-## Entities
+The report only sees what the inverter logs. Limits such as the 264 V trip point are typical values; check them
+against your own inverter settings.
 
-| Entity | What it does |
-|---|---|
-| `select.<station>_report_period` | **Today** or **7 days** |
-| `date.<station>_report_end_date` | Last day of the report (resets to today at midnight) |
-| `button.<station>_generate_report` | Run the report now |
-| `sensor.<station>_report` | Verdict (`healthy` / `watch` / `act` / `error`); counts, findings, key numbers and chart series as attributes |
-| `binary_sensor.<station>_action_needed` | On when the verdict is `act` or the report failed |
-| `sensor.<station>_last_generated` | When the last report finished |
-| `image.<station>_chart_harvest` | Daily harvest by array (stacked columns) |
-| `image.<station>_chart_energy` | Daily house load, export and import |
-| `image.<station>_chart_pv_ac` | PV total vs. inverter AC output, with the AC ceiling |
-| `image.<station>_chart_grid_voltage` | Line voltage with the Watch and trip thresholds |
-| `image.<station>_chart_soc` | Battery state of charge, with its floor |
-| `image.<station>_chart_cell_voltage` | Highest and lowest cell voltage, with the cell limit |
-| `image.<station>_chart_temperatures` | Heatsinks 1–3 and battery temperature |
+## For dashboard builders and automations
 
-The charts are drawn by the integration itself as SVG images and redrawn on every run. Show them with the built-in
-**Picture entity** card; no custom cards are needed.
+- `sensor.<station>_report`: state is `healthy`, `watch`, `act` or `error`. Its attributes hold the whole report:
+  `summary`, `chips`, `stats`, `mppt`, `alarms`, `temperatures`, `daily`, `totals`, `findings`, `checks`, `codes`,
+  `actions`.
+- `binary_sensor.<station>_action_needed`: on for Act or a failed run.
+- `select.<station>_report_period`, `date.<station>_report_end_date`, `button.<station>_generate_report`,
+  `sensor.<station>_last_generated`.
+- Seven chart images, `image.<station>_chart_harvest`, `_energy`, `_pv_ac`, `_grid_voltage`, `_soc`, `_cell_voltage` and
+  `_temperatures`, redrawn every run. Show them with the built-in **Picture entity** card.
+- Service `eg4_solar_report.generate` (optional `period`, `end_date`).
+- Event `eg4_solar_report_generated` with `verdict`, `range`, `counts` and `new_findings`.
 
-**Service** `eg4_solar_report.generate` (optional `period`, `end_date`, `config_entry_id`).
+See the [Dashboard Guide](https://github.com/papac0rn/ha-eg4-solar-report/wiki/Dashboard-Guide) for examples.
 
-**Event** `eg4_solar_report_generated`, with `verdict`, `range`, `counts` and `new_findings`. Use it for your own automations.
+## Privacy and disclaimer
 
-### What the report sensor carries
+- Your EG4 login is stored only in your Home Assistant, like any other integration's login. Reports stay in your
+  Home Assistant. **Download diagnostics** hides your login, station and serial numbers.
+- This uses **unofficial** access to the EG4 Monitor Center. It is not affiliated with or endorsed by EG4 Electronics,
+  and it may break if EG4 changes their website.
 
-Besides the verdict, the `sensor.<station>_report` attributes hold everything a dashboard needs:
+## Credits
 
-- `summary`, `detail`, `chips`: the one-sentence answer and its status chips
-- `stats`: the stat grid; `mppt`: one row per MPPT ("MPPT1 · South"), with kWh, share, peak kW, peak current against
-  its limit and operating-voltage range
-- `daily` and `totals`: the day-by-day table
-- `alarms`: fault codes, warning codes, BMS alarms, packs online, grid events (the 300 s reconnect hold is taken off)
-  and over-voltage hours, each with count, first and last time, and a verdict
-- `temperatures`: heatsinks 1–3, inverter internal, battery and cell min/max, each with min, max, typical and a status.
-  Thresholds are editable under **Configure**.
-- `codes`: every fault, warning or BMS code seen, decoded with its name, meaning, causes and advice, and judged
-  **transient** (cleared on its own, often during a grid event) or **persistent** (repeats or lasts). Unknown codes are
-  rated Watch, never ignored. Code names come from pylxpweb's tables.
-- `findings`, `checks`, `actions`: the findings ledger, the 21 checks, and the numbered "What to do" list
-
-## Diagnostics
-
-Settings → Devices & services → EG4 Solar Report → ⋮ → **Download diagnostics**. Your username, password, station and
-inverter serials are redacted.
+- [pylxpweb](https://github.com/joyfulhouse/pylxpweb) by joyfulhouse, for the Monitor Center client, the export
+  parser and the fault and warning code names
+- Built with [Claude Code](https://claude.com/claude-code)
 
 ## License
 
