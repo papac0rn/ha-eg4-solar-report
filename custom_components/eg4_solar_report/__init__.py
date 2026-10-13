@@ -32,6 +32,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     manager.async_start()
+
+    # First setup: make the Solar Report dashboard so nobody has to find the button. Only once, so a
+    # dashboard the owner deleted isn't brought back.
+    if not entry.data.get("dashboard_created"):
+        from .button import async_create_dashboard
+
+        try:
+            await async_create_dashboard(hass, entry)
+        except Exception as err:  # noqa: BLE001 - setup must not fail over the dashboard
+            _LOGGER.warning("Could not create the Solar Report dashboard: %s", err)
+        else:
+            hass.config_entries.async_update_entry(entry, data={**entry.data, "dashboard_created": True})
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
 
     if not hass.services.has_service(DOMAIN, SERVICE_GENERATE):

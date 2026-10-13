@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import inspect
 import logging
+from typing import Any
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
@@ -18,6 +20,50 @@ from .entity import ReportEntity
 _LOGGER = logging.getLogger(__name__)
 
 DASHBOARD_URL = "eg4-solar-report"
+
+
+def _dashboards_collection(hass: HomeAssistant) -> Any | None:
+    """The storage collection behind Settings → Dashboards.
+
+    Older Home Assistant kept it on hass.data["lovelace"]; newer versions only hand it to the
+    lovelace/dashboards/* websocket commands, so it is found through the create command's handler.
+    """
+    lovelace = hass.data.get("lovelace")
+    if lovelace is not None and getattr(lovelace, "dashboard_collection", None) is not None:
+        return lovelace.dashboard_collection
+    entry = hass.data.get("websocket_api", {}).get("lovelace/dashboards/create")
+    if not entry:
+        return None
+    handler = inspect.unwrap(entry[0])
+    owner = getattr(handler, "__self__", None)
+    return getattr(owner, "storage_collection", None)
+
+
+async def async_create_dashboard(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Create the "Solar Report" dashboard, or rewrite it. It only ever touches its own dashboard."""
+    lovelace = hass.data.get("lovelace")
+    if lovelace is None:
+        raise HomeAssistantError("Dashboards aren't available")
+    if DASHBOARD_URL not in lovelace.dashboards:
+        collection = _dashboards_collection(hass)
+        if collection is None:
+            raise HomeAssistantError(
+                "Couldn't create the dashboard automatically. Add one under Settings → Dashboards and see the "
+                "Dashboard Guide for the cards."
+            )
+        await collection.async_create_item({
+            "url_path": DASHBOARD_URL,
+            "title": "Solar Report",
+            "icon": "mdi:solar-power-variant",
+            "require_admin": False,
+            "show_in_sidebar": True,
+        })
+    dashboard = lovelace.dashboards.get(DASHBOARD_URL)
+    if dashboard is None:
+        raise HomeAssistantError("The Solar Report dashboard could not be created")
+    config = build_dashboard(er.async_get(hass), entry.entry_id, f"Solar Report · {entry.title}")
+    await dashboard.async_save(config)
+    _LOGGER.info("Saved the Solar Report dashboard (%d cards)", len(config["views"][0]["cards"]))
 
 
 async def async_setup_entry(
@@ -40,8 +86,6 @@ class GenerateReportButton(ReportEntity, ButtonEntity):
 
 
 class CreateDashboardButton(ReportEntity, ButtonEntity):
-    """Creates the "Solar Report" dashboard, or rewrites it. It only ever touches its own dashboard."""
-
     _attr_name = "Create Dashboard"
     _attr_icon = "mdi:view-dashboard-edit"
     _attr_entity_category = EntityCategory.CONFIG
@@ -50,21 +94,4 @@ class CreateDashboardButton(ReportEntity, ButtonEntity):
         super().__init__(manager, entry, "create_dashboard")
 
     async def async_press(self) -> None:
-        lovelace = self.hass.data.get("lovelace")
-        if lovelace is None or lovelace.dashboard_collection is None:
-            raise HomeAssistantError("Dashboards aren't available")
-        title = f"Solar Report · {self._entry.title}"
-        if DASHBOARD_URL not in lovelace.dashboards:
-            await lovelace.dashboard_collection.async_create_item({
-                "url_path": DASHBOARD_URL,
-                "title": "Solar Report",
-                "icon": "mdi:solar-power-variant",
-                "require_admin": False,
-                "show_in_sidebar": True,
-            })
-        dashboard = lovelace.dashboards.get(DASHBOARD_URL)
-        if dashboard is None:
-            raise HomeAssistantError("The Solar Report dashboard could not be created")
-        config = build_dashboard(er.async_get(self.hass), self._entry.entry_id, title)
-        await dashboard.async_save(config)
-        _LOGGER.info("Saved the Solar Report dashboard (%d cards)", len(config["views"][0]["cards"]))
+        await async_create_dashboard(self.hass, self._entry)
