@@ -59,13 +59,16 @@ async def _async_register_card(hass: HomeAssistant) -> None:
     await hass.http.async_register_static_paths([StaticPathConfig(CARD_URL, str(folder), False)])
     version = (await async_get_integration(hass, DOMAIN)).version
     url = f"{CARD_URL}/eg4-solar-report-card.js?v={version}"
-    frontend.add_extra_js_url(hass, url)
-    # Also list it as a dashboard resource. Dashboards wait for their resources before drawing cards, so the
-    # card is always defined in time (the extra script alone can lose that race on a slow phone).
+    # Load it as a dashboard resource, the way HACS cards load. An extra script on the main page as well
+    # defined the card where some Android app WebViews' dashboards never saw it ("Custom element doesn't
+    # exist"), so the extra script is only the fallback when resources are managed in YAML.
     try:
-        await _async_ensure_resource(hass, url)
-    except Exception as err:  # noqa: BLE001 - the extra script still loads the card
+        added = await _async_ensure_resource(hass, url)
+    except Exception as err:  # noqa: BLE001
         _LOGGER.debug("Could not add the report card as a dashboard resource: %s", err)
+        added = False
+    if not added:
+        frontend.add_extra_js_url(hass, url)
 
 
 async def _async_ensure_resource(hass: HomeAssistant, url: str) -> None:
