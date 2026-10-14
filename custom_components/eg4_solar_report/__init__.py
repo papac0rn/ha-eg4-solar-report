@@ -71,11 +71,11 @@ async def _async_register_card(hass: HomeAssistant) -> None:
         frontend.add_extra_js_url(hass, url)
 
 
-async def _async_ensure_resource(hass: HomeAssistant, url: str) -> None:
+async def _async_ensure_resource(hass: HomeAssistant, url: str) -> bool:
     lovelace = hass.data.get("lovelace")
     resources = getattr(lovelace, "resources", None)
     if resources is None or not hasattr(resources, "async_create_item"):
-        return  # YAML-mode resources are managed by the owner
+        return False  # YAML-mode resources are managed by the owner
     if not resources.loaded:
         await resources.async_load()
         resources.loaded = True
@@ -84,8 +84,9 @@ async def _async_ensure_resource(hass: HomeAssistant, url: str) -> None:
         if str(item.get("url", "")).split("?")[0] == base:
             if item["url"] != url:
                 await resources.async_update_item(item["id"], {"res_type": "module", "url": url})
-            return
+            return True
     await resources.async_create_item({"res_type": "module", "url": url})
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
