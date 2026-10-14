@@ -84,7 +84,7 @@ footer{color:var(--faint);font-size:11.5px;border-top:1px solid var(--rule);padd
 .empty{padding:40px 20px;text-align:center;color:var(--dim)}
 `;
 
-const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const esc = (v) => String(v == null ? "" : v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const SEV = { ok: "OK", info: "Info", watch: "Watch", act: "Act" };
 const CHARTS = ["harvest", "energy", "pv_ac", "grid_voltage", "soc", "cell_voltage", "temperatures"];
 
@@ -93,6 +93,12 @@ class Eg4SolarReportCard extends HTMLElement {
     if (!config || !config.entity) throw new Error("Set 'entity' to the report sensor, for example sensor.my_station_report");
     this._config = config;
     this._key = null;
+    if (this._hass) this.hass = this._hass;
+  }
+
+  static getStubConfig(hass) {
+    const id = Object.keys(hass.states).find((e) => e.startsWith("sensor.") && e.endsWith("_report") && hass.states[e].attributes.checks !== undefined);
+    return { entity: id || "sensor.my_station_report" };
   }
 
   getCardSize() {
@@ -105,6 +111,19 @@ class Eg4SolarReportCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    // Some devices hand over hass before setConfig; wait for the config instead of failing
+    if (!this._config) return;
+    try {
+      this._update(hass);
+    } catch (err) {
+      // Show the real problem in the card rather than Home Assistant's bare "Configuration error"
+      if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+      this.shadowRoot.innerHTML = `<style>${CSS}</style><div class="page"><div class="empty">EG4 Solar Report card error: ${esc(err && err.message)}</div></div>`;
+      console.error("eg4-solar-report-card", err);
+    }
+  }
+
+  _update(hass) {
     const st = hass.states[this._config.entity];
     const related = this._related(hass);
     // Re-render only when something shown actually changed
@@ -119,7 +138,7 @@ class Eg4SolarReportCard extends HTMLElement {
 
   _related(hass) {
     if (this._relatedIds) return this._relatedIds;
-    const reg = hass.entities || {};
+    const reg = (hass && hass.entities) || {};
     const me = reg[this._config.entity];
     const ids = me && me.device_id ? Object.keys(reg).filter((id) => reg[id].device_id === me.device_id) : [];
     if (ids.length) this._relatedIds = ids;
