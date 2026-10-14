@@ -5,7 +5,6 @@ import logging
 import voluptuous as vol
 
 from homeassistant.components import persistent_notification
-from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ServiceValidationError
@@ -30,18 +29,6 @@ GENERATE_SCHEMA = vol.Schema(
 CARD_URL = "/eg4_solar_report_static"
 
 
-class _CardPingView(HomeAssistantView):
-    """TEMPORARY diagnostic: the report card reports that it loaded (or failed), and on which browser."""
-
-    url = "/api/eg4_solar_report/card_ping"
-    name = "api:eg4_solar_report:card_ping"
-    requires_auth = False
-
-    async def get(self, request):
-        q = request.query
-        _LOGGER.warning("Report card %s on %s: %s", q.get("e", "?")[:20], q.get("ua", "?")[:200], q.get("m", "")[:300])
-        return self.json({})
-
 
 async def _async_register_card(hass: HomeAssistant) -> None:
     """Serve the report card and load it in every browser, so no HACS frontend install is needed."""
@@ -55,7 +42,6 @@ async def _async_register_card(hass: HomeAssistant) -> None:
     from homeassistant.loader import async_get_integration
 
     folder = Path(__file__).parent / "frontend"
-    hass.http.register_view(_CardPingView())
     await hass.http.async_register_static_paths([StaticPathConfig(CARD_URL, str(folder), False)])
     version = (await async_get_integration(hass, DOMAIN)).version
     url = f"{CARD_URL}/eg4-solar-report-card.js?v={version}"

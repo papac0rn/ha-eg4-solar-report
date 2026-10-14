@@ -10,7 +10,7 @@ It downloads your EG4 inverter's own log from the **EG4 Monitor Center** (the sa
 website), runs **21 checks** on it, and tells you **Healthy**, **Watch** or **Act**, with what it found and what to do
 about it. It works on today or on the last 7 days, runs on a schedule if you want, and can run itself after a power outage.
 
-> **Beta (0.1.4).** Built and tested against real FlexBOSS 21 logs. Other EG4 models should work but haven't been tried
+> **Beta (0.1.5).** Built and tested against real FlexBOSS 21 logs. Other EG4 models should work but haven't been tried
 > yet. Please [open an issue](https://github.com/papac0rn/ha-eg4-solar-report/issues) if something looks wrong.
 
 ![The Solar Report page: verdict, readouts, alarm and temperature panels, findings](images/report-top.png)

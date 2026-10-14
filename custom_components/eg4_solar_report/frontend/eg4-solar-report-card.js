@@ -9,10 +9,6 @@
  * The other entities (period, end date, Generate button, chart images) are found from the report
  * sensor's device, so only the report entity is needed.
  */
-// TEMPORARY diagnostic: report that this file loaded, and any error it hits, to the integration's log
-const _ping = (e, m) => { try { fetch(`/api/eg4_solar_report/card_ping?e=${e}&ua=${encodeURIComponent(navigator.userAgent)}&m=${encodeURIComponent(m || "")}`); } catch (_) {} };
-_ping("loaded", location.pathname);
-window.addEventListener("error", (ev) => { if (String(ev.filename || "").includes("eg4")) _ping("error", `${ev.message} @${ev.lineno}`); });
 const CSS = `
 :host{
   --bg:#0d1020; --panel:#141931; --panel2:#1a2040; --rule:#2a3157;
@@ -280,7 +276,6 @@ class Eg4SolarReportCard extends HTMLElement {
   }
 }
 
-_ping("defining", String(!!customElements.get("eg4-solar-report-card")));
 if (!customElements.get("eg4-solar-report-card")) {
   customElements.define("eg4-solar-report-card", Eg4SolarReportCard);
   window.customCards = window.customCards || [];
