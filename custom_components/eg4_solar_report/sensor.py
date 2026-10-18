@@ -30,7 +30,7 @@ class ReportSensor(ReportEntity, SensorEntity):
     _unrecorded_attributes = frozenset(
         {
             "detail", "chips", "stats", "daily", "totals", "findings", "checks", "actions", "series",
-            "array_names", "array_labels", "alarms", "temperatures", "mppt", "codes",
+            "array_names", "array_labels", "alarms", "temperatures", "mppt", "codes", "thresholds", "backup", "cycles",
         }
     )
 
@@ -80,6 +80,11 @@ class ReportSensor(ReportEntity, SensorEntity):
             "checks": report.get("checks", []),
             "actions": report.get("actions", []),
             "series": report.get("series", {}),
+            "firmware": report.get("firmware"),
+            "thresholds": report.get("thresholds"),
+            "backup": report.get("backup"),
+            "cycles": report.get("cycles"),
+            "soc_floor": report.get("soc_floor"),
         }
 
 
