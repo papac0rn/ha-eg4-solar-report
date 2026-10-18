@@ -29,7 +29,7 @@ SETTINGS = {
     "import_rate": 0.086,
     "export_credit": 0.049,
     "nominal_voltage": 240,
-    "hv_watch": 254,
+    "hv_watch": 260,
     "hv_act": 264,
     "utility_name": "the utility",
     "battery_kwh": 0,
@@ -94,13 +94,18 @@ def test_day_pv_matches_answer_key(day_report):
 
 
 def test_day_grid_voltage_matches_answer_key(day_report):
-    f = _finding(day_report, "grid_high_voltage")
-    facts = dict(f["facts"])
+    check = analyzer.rule_grid_high_voltage(_day_ctx())
+    facts = dict(check.facts)
     assert facts["Peak"] == "259.9 V at Sep 26 14:46"
     assert facts["Peak export"] == "14.4 kW at 13:58"
     assert float(facts["V vs export"].split("=")[1]) == pytest.approx(0.96, abs=0.01)
-    assert "between 12:53 and 15:5" in f["detail"]
-    assert f["severity"] == "watch"
+    assert "Time > 254 V (ANSI service limit)" in facts
+    # Rev D: judged against the 264 V trip, so the day is ok and the margin is shown
+    assert check.severity == "ok"
+    assert check.result == "Peak 259.9 V · 4.1 V below the 264 V trip"
+    assert "Volt-watt curtailment" in check.detail
+    assert _check(day_report, "grid_high_voltage")["status"] == "ok"
+    assert not any(f["id"] == "grid_high_voltage" for f in day_report["findings"])
 
 
 def test_day_clean_inverter_and_battery(day_report):
@@ -119,13 +124,15 @@ def test_day_cell_spread_matches_answer_key(day_report):
     assert "44 mV peak" in result
 
 
-def test_day_heatsink_imbalance_matches_answer_key(day_report):
-    f = _finding(day_report, "inverter_heatsink")
-    facts = dict(f["facts"])
+def test_day_heatsink_gap_is_a_fact_not_a_finding(day_report):
+    check = analyzer.rule_inverter_heatsink(_day_ctx())
+    facts = dict(check.facts)
     assert facts["Heatsink 1"] == "peak 73 °C at 12:13"
-    gap = float(facts["Heatsink 1 vs others, PV off"].removesuffix(" °C"))
-    assert gap == pytest.approx(3.3, abs=0.3)
-    assert "airflow" in f["detail"]
+    gap_text = facts["Heatsink 1 vs others, overnight"]
+    assert gap_text.endswith("(normal: heatsink 1 carries battery current)")
+    assert float(gap_text.split(" °C")[0]) == pytest.approx(3.3, abs=0.3)
+    assert check.severity == "ok"
+    assert not any(f["id"] == "inverter_heatsink" for f in day_report["findings"])
 
 
 def test_charts_render_from_the_day(day_report):
@@ -204,13 +211,13 @@ def test_transient_with_voltage_excursion_is_ok():
 def test_panels(day_report):
     temps = {t["sensor"]: t for t in day_report["temperatures"]}
     assert temps["Heatsink 1"]["max"] == 73
-    assert temps["Heatsink 1"]["status"] == "watch"
-    assert "airflow/fan" in temps["Heatsink 1"]["note"]
+    assert temps["Heatsink 1"]["status"] == "ok"
+    assert "normal: heatsink 1 carries battery current" in temps["Heatsink 1"]["note"]
     alarms = {a["alarm"].split(" (")[0]: a for a in day_report["alarms"]}
     assert alarms["Fault codes"]["count"] == 0 and alarms["Fault codes"]["verdict"] == "ok"
     assert alarms["Packs"]["verdict"] == "ok"
     assert any(a["alarm"] == "Packs (4/4 online)" for a in day_report["alarms"])
-    assert alarms["Over-voltage hours"]["verdict"] == "watch"
+    assert alarms["Hours over 254 V"]["verdict"] == "ok"
     assert day_report["array_labels"] == ["MPPT1 · South", "MPPT2 · East", "MPPT3 · West"]
     south = day_report["mppt"][0]
     assert south["kwh"] == 60.3 and south["limit_a"] == 26
@@ -220,10 +227,71 @@ def test_panels(day_report):
     assert chips["Fault codes 0"] == "ok" and chips["Grid outages 0"] == "ok"
 
 
-def test_heatsink_imbalance_is_watch(day_report):
-    f = _finding(day_report, "inverter_heatsink")
-    assert f["severity"] == "watch"
-    assert f["title"] == "Airflow/fan on heatsink 1"
+def _day_ctx(settings: dict | None = None, edit=None) -> object:
+    """The real 09-26 day as a Ctx, optionally with its rows edited first."""
+    _header, rows = analyzer.parse_export((FIXTURES / "day-2026-09-26.xls").read_bytes())
+    if edit:
+        edit(rows)
+    return analyzer._build_ctx(analyzer.Log(rows), {**SETTINGS, **(settings or {})}, DAY, DAY)
+
+
+def _peak_row(rows: list[dict]) -> int:
+    return max(range(len(rows)), key=lambda i: analyzer._num(rows[i].get("vacr")) or 0)
+
+
+def test_heatsink_at_96c_is_watch():
+    def hot(rows):
+        rows[len(rows) // 2]["tradiator2"] = "96"
+    check = analyzer.rule_inverter_heatsink(_day_ctx(edit=hot))
+    assert check.severity == "watch"
+    assert check.title == "Heatsink 2 runs hot"
+
+
+def test_heatsink_code_w013_is_act_regardless_of_temperature():
+    def code(rows):
+        rows[120]["warningCode"] = f"0x{1 << 13:X}"
+    check = analyzer.rule_inverter_heatsink(_day_ctx(edit=code))
+    assert check.severity == "act"
+    assert "W013" in check.title
+
+
+def test_voltage_261_is_watch():
+    def v(rows):
+        rows[_peak_row(rows)]["vacr"] = "261"
+    check = analyzer.rule_grid_high_voltage(_day_ctx(edit=v))
+    assert check.severity == "watch"
+    assert check.result == "Peak 261.0 V · 3.0 V below the 264 V trip"
+    assert "tap" not in check.detail and all("utility" not in a for a in check.actions)
+
+
+def test_voltage_264_or_w017_is_act():
+    def v(rows):
+        rows[_peak_row(rows)]["vacr"] = "264"
+    assert analyzer.rule_grid_high_voltage(_day_ctx(edit=v)).severity == "act"
+
+    def code(rows):
+        rows[_peak_row(rows)]["warningCode"] = f"0x{1 << 17:X}"
+    check = analyzer.rule_grid_high_voltage(_day_ctx(edit=code))
+    assert check.severity == "act"
+    assert check.title == "Grid over-voltage code (W017)"
+
+
+def test_three_day_pattern_at_258_is_ok():
+    content = (FIXTURES / "pack-dropout-2026-08-24_27.xls").read_bytes()
+    _header, rows = analyzer.parse_export(content)
+    for r in rows:
+        v = analyzer._num(r.get("vacr"))
+        if v is not None and v > 254:
+            r["vacr"] = "258"  # hours above 254 V on every afternoon
+    ctx = analyzer._build_ctx(analyzer.Log(rows), SETTINGS, date(2026, 8, 24), date(2026, 8, 27))
+    check = analyzer.rule_grid_high_voltage(ctx)
+    assert check.severity == "ok"
+    assert check.result.startswith("Peak 258.0 V")
+
+
+def test_stored_temp_imbalance_is_ignored():
+    check = analyzer.rule_inverter_heatsink(_day_ctx({"temp_imbalance": 0.5}))
+    assert check.severity == "ok"
 
 
 def test_dropout_alarm_row(dropout_report):
@@ -239,9 +307,9 @@ def test_fahrenheit_report():
     assert temps["Heatsink 1"]["max"] == pytest.approx(163.4)
     assert temps["Heatsink 1"]["unit"] == "°F"
     assert temps["Heatsink 1"]["watch"] == pytest.approx(203)
-    facts = dict(_finding(r, "inverter_heatsink")["facts"])
+    facts = dict(analyzer.rule_inverter_heatsink(_day_ctx({"temp_unit": "F"})).facts)
     assert facts["Heatsink 1"] == "peak 163 °F at 12:13"
-    assert facts["Heatsink 1 vs others, PV off"].endswith("°F")
+    assert "°F" in facts["Heatsink 1 vs others, overnight"]
     assert next(s for s in r["stats"] if s["label"] == "Heatsink max")["value"] == "163 °F"
     assert b"\xc2\xb0F" in charts.render_all(r["_chart_series"], {**SETTINGS, "temp_unit": "F"})["temperatures"]
 

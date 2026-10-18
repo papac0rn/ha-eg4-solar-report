@@ -23,7 +23,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Callable, Sequence
 
 from . import codes
-from .const import DEFAULT_TEMP_IMBALANCE, TEMP_THRESHOLDS
+from .const import ANSI_SERVICE_LIMIT_V, DEFAULT_HV_ACT, DEFAULT_HV_WATCH, TEMP_THRESHOLDS
 
 SEVERITY_ORDER = {"ok": 0, "info": 1, "watch": 2, "act": 3}
 
@@ -319,8 +319,8 @@ class Ctx:
     import_kw: list[float | None] = field(default_factory=list)
     nominal_v: float = 240.0
     nominal_f: float = 60.0
-    hv_watch: float = 254.0
-    hv_act: float = 264.0
+    hv_watch: float = float(DEFAULT_HV_WATCH)
+    hv_act: float = float(DEFAULT_HV_ACT)
     battery_kwh: float | None = None
     soc_floor: float | None = None
     notes: list[Check] = field(default_factory=list)
@@ -338,8 +338,8 @@ def _build_ctx(log: Log, settings: dict[str, Any], start: date, end: date) -> Ct
         ctx.partial[d] = (last - first).total_seconds() < 20 * 3600
 
     ctx.nominal_v = float(settings.get("nominal_voltage") or 240)
-    ctx.hv_watch = float(settings.get("hv_watch") or 254)
-    ctx.hv_act = float(settings.get("hv_act") or 264)
+    ctx.hv_watch = float(settings.get("hv_watch") or DEFAULT_HV_WATCH)
+    ctx.hv_act = float(settings.get("hv_act") or DEFAULT_HV_ACT)
     fac = _vals(log.f("fac"))
     ctx.nominal_f = 50.0 if fac and statistics.median(fac) < 55 else 60.0
 
@@ -379,7 +379,7 @@ def _build_ctx(log: Log, settings: dict[str, Any], start: date, end: date) -> Ct
         export, imp, inv = day_max("eToGridDay"), day_max("eToUserDay"), day_max("eInvDay")
         socs = _vals(soc[i] for i in idx)
         volts = _vals(vacr[i] for i in idx)
-        over = sum(1 for i in idx if (vacr[i] or 0) > ctx.hv_watch)
+        over = sum(1 for i in idx if (vacr[i] or 0) > ANSI_SERVICE_LIMIT_V)
         clip = sum(1 for i in idx if ceiling and (pinv[i] or 0) >= ceiling - 0.5)
         ctx.daily.append({
             "day": _day(d),
@@ -505,48 +505,58 @@ def rule_grid_high_voltage(c: Ctx) -> Check:
         facts.append(("Peak export", f"{ex_pk:.1f} kW at {_hm(ex_t)}"))
     if all(v is not None for v in legs) and legs:
         facts.append(("Per leg at peak", " / ".join(f"{v:.1f}" for v in legs) + " V"))
-    facts.append((f"Time > {c.hv_watch:g} V", f"{hours:.1f} h on {len(days_over)} day(s)"))
+    facts.append((f"Time > {ANSI_SERVICE_LIMIT_V} V (ANSI service limit)", f"{hours:.1f} h on {len(days_over)} day(s)"))
     if r is not None:
         facts.append(("V vs export", f"r = {r:.2f}"))
     if fit:
         facts.append(("Fit", f"{fit[0]:.1f} V + {fit[1]:.2f} V per kW exported"))
 
-    if peak < c.hv_watch:
-        return Check("grid_high_voltage", "ok", f"Peak {peak:.1f} V", facts=facts)
-
+    # An inverter grid over-voltage code: W017 while the line is on the high side of nominal
+    ov_hits = [i for i in _bit_samples(c, [17], need_all=False)
+               if vacr[i] is not None and vacr[i] >= 1.05 * c.nominal_v]
     margin = c.hv_act - peak
-    pattern = len(days_over) >= 3 and hours >= 5
-    severity = "act" if peak >= c.hv_act or pattern else "watch"
-    window = ""
-    if len(c.days) == 1:
-        over_idx = [i for i, v in enumerate(vacr) if (v or 0) > c.hv_watch]
-        window = f" between {_hm(log.t[over_idx[0]])} and {_hm(log.t[over_idx[-1]])}"
+    result = (f"Peak {peak:.1f} V · {margin:.1f} V below the {c.hv_act:g} V trip" if margin > 0
+              else f"Peak {peak:.1f} V · at or above the {c.hv_act:g} V trip")
+    context = (" Volt-watt curtailment, if enabled in the inverter, can trim export at high voltage."
+               if peak > ANSI_SERVICE_LIMIT_V else "")
+    if peak >= c.hv_act or ov_hits:
+        severity = "act"
+    elif peak >= c.hv_watch:
+        severity = "watch"
+    else:
+        detail = (f"The highest line voltage was {peak:.1f} V on {_day(peak_t)} at {_hm(peak_t)}, {margin:.1f} V below "
+                  f"the {c.hv_act:g} V point where the inverter disconnects." + context)
+        return Check("grid_high_voltage", "ok", result, detail=detail, facts=facts)
+
     slope_txt = ""
     if slopes and fit:
         lo, hi = min(slopes), max(slopes)
         rng = f"{lo:.2f}" if round(lo, 2) == round(hi, 2) else f"{lo:.2f}–{hi:.2f}"
-        slope_txt = (f" The slope is {rng} V per kW exported on a no-export baseline of about "
-                     f"{fit[0]:.0f} V, so this is line impedance plus a high utility voltage, not a fault that comes and goes.")
-    title = (f"Grid voltage, every sunny day" if pattern else f"Grid voltage reached {peak:.1f} V while exporting")
-    detail = (f"Line voltage went over {c.hv_watch:g} V on {len(days_over)} day(s), {hours:.1f} h in total{window}, "
-              f"peaking at {peak:.1f} V on {_day(peak_t)} at {_hm(peak_t)}"
-              + (f" with {export_at_peak:.1f} kW of export" if export_at_peak else "") + ". "
-              f"That is {margin:.1f} V under the usual {c.hv_act:g} V trip point." + slope_txt)
-    utility = c.settings.get("utility_name") or "your utility"
+        slope_txt = f" Voltage rises {rng} V per kW exported from a no-export baseline of about {fit[0]:.0f} V."
+    if ov_hits:
+        first = log.t[ov_hits[0]]
+        title = "Grid over-voltage code (W017)"
+        detail = (f"The inverter logged W017 (grid voltage out of range) on the high side in {len(ov_hits)} sample(s), "
+                  f"first at {_day(first)} {_hm(first)}. The peak was {peak:.1f} V.")
+    elif severity == "act":
+        title = f"Grid voltage reached the {c.hv_act:g} V trip"
+        detail = (f"Line voltage reached {peak:.1f} V on {_day(peak_t)} at {_hm(peak_t)}"
+                  + (f" with {export_at_peak:.1f} kW of export" if export_at_peak else "")
+                  + f". At {c.hv_act:g} V the inverter disconnects from the grid after about 2 seconds.")
+    else:
+        title = f"Grid voltage within {margin:.1f} V of the inverter trip"
+        detail = (f"Line voltage peaked at {peak:.1f} V on {_day(peak_t)} at {_hm(peak_t)}"
+                  + (f" with {export_at_peak:.1f} kW of export" if export_at_peak else "")
+                  + f", {margin:.1f} V below the {c.hv_act:g} V trip.")
+    detail += slope_txt + context
     actions = [
-        f"Check the inverter's grid over-voltage setpoint. With {peak:.1f} V already logged, you want to know whether "
-        f"the trip is at {c.hv_act:g} V and how long it waits before disconnecting.",
+        f"Check the inverter's grid over-voltage setting: confirm the trip is at {c.hv_act:g} V and how long it waits "
+        "before disconnecting.",
+        "Measure at the meter during peak export. Comparing it with the inverter reading shows how much of the rise is "
+        "in your own wiring.",
     ]
-    if severity == "act":
-        actions.append(
-            f"Call {utility} about voltage. Data showing about {fit[0]:.0f} V with no export and higher every sunny "
-            "afternoon is a clear case for a transformer tap change (one tap down, 2.5 %, is about 6 V)."
-            if fit else f"Call {utility} about the line voltage."
-        )
-        actions.append("Measure at the meter during peak export. Comparing it with the inverter reading shows how "
-                       "much of the rise is in your own feeder.")
     return Check(
-        "grid_high_voltage", severity, f"Peak {peak:.1f} V, {margin:.1f} V below a typical trip point",
+        "grid_high_voltage", severity, result,
         title=title, detail=detail, action=actions[0], facts=facts, actions=actions,
     )
 
@@ -881,7 +891,6 @@ def rule_inverter_warnings(c: Ctx) -> Check:
 
 
 TEMP_DEFAULTS = TEMP_THRESHOLDS
-DEFAULT_IMBALANCE_C = DEFAULT_TEMP_IMBALANCE
 
 
 def _temp_limits(c: Ctx, cls: str) -> tuple[float, float]:
@@ -901,6 +910,19 @@ def radiator_gap(c: Ctx) -> float | None:
     return r1 - statistics.fmean(others)
 
 
+HEATSINK_CODES = (("warning", 13), ("fault", 25))  # W013 radiator temperature, E025 heatsink temperature
+
+
+def _heatsink_code_hits(c: Ctx) -> list[tuple[str, int]]:
+    hits = []
+    for kind, bit in HEATSINK_CODES:
+        col = "warningCode" if kind == "warning" else "faultCode"
+        if c.log.has(col):
+            prefix = "W" if kind == "warning" else "E"
+            hits += [(f"{prefix}{bit:03d}", i) for i, code in enumerate(c.log.codes(col)) if code >> bit & 1]
+    return hits
+
+
 def rule_inverter_heatsink(c: Ctx) -> Check:
     log = c.log
     rads = {k: log.f(f"tradiator{k}") for k in (1, 2, 3) if log.has(f"tradiator{k}")}
@@ -911,31 +933,32 @@ def rule_inverter_heatsink(c: Ctx) -> Check:
     peak, peak_t, peak_i = peaks[k_hot]
     facts = [(f"Heatsink {k}", f"peak {_t(c, p[0])} at {_hm(p[1])}") for k, p in peaks.items() if p[0] is not None]
     gap = radiator_gap(c)
-    limit = float(c.settings.get("temp_imbalance") or DEFAULT_IMBALANCE_C)
     if gap is not None:
-        facts.append(("Heatsink 1 vs others, PV off", _dt(c, gap, signed=True)))
+        # Informational only: heatsink 1 sits on the stage that carries battery current, so it runs warmer, overnight too
+        facts.append(("Heatsink 1 vs others, overnight",
+                      _dt(c, gap, signed=True) + " (normal: heatsink 1 carries battery current)"))
     watch, act = _temp_limits(c, "heatsink")
-    imbalance = gap is not None and gap >= limit
-    result = f"Peak {_t(c, peak)} (heatsink {k_hot})" + (f"; heatsink 1 runs {_dt(c, gap, signed=True)} at idle" if imbalance else "")
-    if peak >= act:
+    hits = _heatsink_code_hits(c)
+    result = f"Peak {_t(c, peak)} (heatsink {k_hot})"
+    if hits or peak >= act:
         sev = "act"
-    elif peak >= watch or imbalance:
+    elif peak >= watch:
         sev = "watch"
     else:
         return Check("inverter_heatsink", "ok", result, facts=facts)
     charge = log.kw("pCharge")[peak_i] if peak_i is not None else None
     detail = (f"Heatsink {k_hot} peaked at {_t(c, peak)} on {_day(peak_t)} at {_hm(peak_t)}"
               + (f" with the battery charging at {charge:.1f} kW" if charge else "") + ".")
-    if imbalance:
-        detail += (f" Overnight, with no PV flowing, heatsink 1 still sits {_dt(c, gap)} above heatsinks 2 and 3. That "
-                   "is not load, so it points to airflow or a fan on heatsink 1.")
-    hot = peak >= watch
+    seen = sorted({code for code, _i in hits})
+    if hits:
+        first = log.t[hits[0][1]]
+        detail += (f" The inverter logged {', '.join(seen)} (heatsink temperature out of range) in {len(hits)} "
+                   f"sample(s), first at {_day(first)} {_hm(first)}.")
     return Check(
         "inverter_heatsink", sev, result,
-        title=f"Heatsink {k_hot} runs hot" if hot else "Airflow/fan on heatsink 1",
+        title=f"Inverter temperature code {', '.join(seen)}" if hits else f"Heatsink {k_hot} runs hot",
         detail=detail, facts=facts,
-        action="Check the fan on heatsink 1's side and clear its air path, then compare the overnight gap in the next report."
-        if imbalance and not hot else "Check the inverter's fans and clear its air path.",
+        action="Check the inverter's fans and clear its air path.",
     )
 
 def rule_inverter_output_ceiling(c: Ctx) -> Check:
@@ -1176,7 +1199,6 @@ TEMP_SENSORS = (
 def temperatures(c: Ctx) -> list[dict[str, Any]]:
     rows = []
     gap = radiator_gap(c)
-    imbalance = float(c.settings.get("temp_imbalance") or DEFAULT_IMBALANCE_C)
     for col, name, cls in TEMP_SENSORS:
         if not c.log.has(col):
             continue
@@ -1193,10 +1215,7 @@ def temperatures(c: Ctx) -> list[dict[str, Any]]:
         if cls == "cell" and min(v) < 0:
             status, note = "act", "below freezing; the BMS limits charging"
         if col == "tradiator1" and gap is not None:
-            note = f"{_dt(c, gap, signed=True)} vs heatsinks 2/3 overnight with no PV"
-            if gap >= imbalance and status == "ok":
-                status = "watch"
-                note += ": airflow/fan"
+            note = f"{_dt(c, gap, signed=True)} vs heatsinks 2/3 overnight (normal: heatsink 1 carries battery current)"
         conv = (lambda x: round(x * 9 / 5 + 32, 1)) if _fahrenheit(c) else (lambda x: x)
         rows.append({
             "sensor": name, "column": col, "unit": "°F" if _fahrenheit(c) else "°C",
@@ -1271,9 +1290,9 @@ def alarms(c: Ctx, checks: Sequence[Check], occ: dict[str, list[dict[str, Any]]]
                     events[-1]["end"] if events else None, by["grid_outages"].severity,
                     "; ".join(f"{_day(e['start'])} {_hm(e['start'])} {'blip' if e['blip'] else _hours(e['real_s'] / 60)}"
                               for e in events[:6]) if events else "grid present throughout"))
-    over = [i for i, v in enumerate(c.log.f("vacr")) if (v or 0) > c.hv_watch]
+    over = [i for i, v in enumerate(c.log.f("vacr")) if (v or 0) > ANSI_SERVICE_LIMIT_V]
     hours = sum(d["h_over"] for d in c.daily)
-    rows.append(row(f"Over-voltage hours (> {c.hv_watch:g} V)", len({c.log.t[i].date() for i in over}),
+    rows.append(row(f"Hours over {ANSI_SERVICE_LIMIT_V} V (ANSI service limit)", len({c.log.t[i].date() for i in over}),
                     c.log.t[over[0]] if over else None, c.log.t[over[-1]] if over else None,
                     by["grid_high_voltage"].severity, f"{hours:.1f} h"))
     return rows

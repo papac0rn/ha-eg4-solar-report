@@ -339,6 +339,9 @@ def render_pv_ac(series: dict[str, Any], ceiling_kw: float | None) -> bytes:
     )
 
 
+ANSI_V = 254  # utility service limit (ANSI C84.1 Range B), drawn for reference
+
+
 def render_grid_voltage(series: dict[str, Any], hv_watch: float | None, hv_act: float | None) -> bytes:
     volts = _finite(series.get("v"))
     if not volts:
@@ -348,6 +351,8 @@ def render_grid_voltage(series: dict[str, Any], hv_watch: float | None, hv_act: 
         refs.append((hv_watch, f"{_fmt(hv_watch)} V", WATCH, "2 4", "start"))
     if hv_act:
         refs.append((hv_act, f"{_fmt(hv_act)} V typical trip", ACT, "6 3", "end"))
+    if not hv_watch or hv_watch > ANSI_V:
+        refs.append((ANSI_V, f"{ANSI_V} V ANSI", FAINT, "1 3", "start"))
     band = (hv_watch, hv_act or max(volts), WATCH, 0.09) if hv_watch else None
     lo = min(volts) - 2
     hi = max(volts + [hv_act or 0]) + 1

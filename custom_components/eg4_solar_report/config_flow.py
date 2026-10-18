@@ -88,9 +88,7 @@ from .const import (
     SYSTEM_PROFILES,
     SYSTEM_TYPES,
     TEMP_THRESHOLDS,
-    OPT_TEMP_IMBALANCE,
     OPT_TEMP_UNIT,
-    DEFAULT_TEMP_IMBALANCE,
     WEEKDAYS,
 )
 
@@ -511,6 +509,8 @@ class Eg4SolarReportOptionsFlow(OptionsFlow):
         schema[vol.Required(CONF_BATTERY_KWH, default=opts.get(CONF_BATTERY_KWH, data.get(CONF_BATTERY_KWH, 0)))] = _number(0, 1000, 0.1, "kWh")
         schema[vol.Required(CONF_PACK_COUNT, default=opts.get(CONF_PACK_COUNT, data.get(CONF_PACK_COUNT, DEFAULT_PACK_COUNT)))] = _number(1, 64, 1)
         schema[vol.Required(CONF_PACK_DISCHARGE_A, default=opts.get(CONF_PACK_DISCHARGE_A, data.get(CONF_PACK_DISCHARGE_A, 0)))] = _number(0, 1000, 1, "A")
+        schema[vol.Required(CONF_HV_WATCH, default=opts.get(CONF_HV_WATCH, data.get(CONF_HV_WATCH, DEFAULT_HV_WATCH)))] = _number(100, 500, 1, "V")
+        schema[vol.Required(CONF_HV_ACT, default=opts.get(CONF_HV_ACT, data.get(CONF_HV_ACT, DEFAULT_HV_ACT)))] = _number(100, 500, 1, "V")
         schema[vol.Required(OPT_REPORT_LOCATION, default=opts.get(OPT_REPORT_LOCATION, data.get(OPT_REPORT_LOCATION, TARGET_NEW)))] = _location_selector(self.hass)
         schema[vol.Required(OPT_TEMP_UNIT, default=opts.get(OPT_TEMP_UNIT, _default_unit(self.hass)))] = SelectSelector(
             SelectSelectorConfig(options=["f", "c"], translation_key="temp_unit", mode=SelectSelectorMode.LIST)
@@ -521,12 +521,10 @@ class Eg4SolarReportOptionsFlow(OptionsFlow):
         """Thresholds shown and entered in the chosen unit; stored in °C."""
         unit = str(self._opts.get(OPT_TEMP_UNIT, "c")).upper()
         if user_input is not None:
-            stored = {
-                k: (round(v * 5 / 9, 1) if k == OPT_TEMP_IMBALANCE and unit == "F" else
-                    v if k == OPT_TEMP_IMBALANCE else _from_unit(v, unit))
-                for k, v in user_input.items()
-            }
-            return self.async_create_entry(data={**self._opts, **stored})
+            stored = {k: _from_unit(v, unit) for k, v in user_input.items()}
+            # temp_imbalance (removed in 0.1.6) may still be stored; drop it so it isn't carried forward
+            kept = {k: v for k, v in self._opts.items() if k != "temp_imbalance"}
+            return self.async_create_entry(data={**kept, **stored})
 
         opts = self.config_entry.options
         sym = "°F" if unit == "F" else "°C"
@@ -536,6 +534,4 @@ class Eg4SolarReportOptionsFlow(OptionsFlow):
                 key = f"temp_{cls}_{level}"
                 current = _to_unit(opts.get(key, default), unit)
                 schema[vol.Required(key, default=current)] = _number(-20, 300, 1, sym)
-        gap = opts.get(OPT_TEMP_IMBALANCE, DEFAULT_TEMP_IMBALANCE)
-        schema[vol.Required(OPT_TEMP_IMBALANCE, default=round(gap * 9 / 5, 1) if unit == "F" else gap)] = _number(0.5, 40, 0.1, sym)
         return self.async_show_form(step_id="temperatures", data_schema=vol.Schema(schema))

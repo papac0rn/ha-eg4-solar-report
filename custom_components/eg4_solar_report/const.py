@@ -57,7 +57,8 @@ SYSTEM_PROFILES = {
 }
 EMPTY_PROFILE = {"mppt_limits_a": "", "pv_max_v": 0, "output_ceiling_kw": 0}
 DEFAULT_NOMINAL_VOLTAGE = 240
-DEFAULT_HV_WATCH = 254
+DEFAULT_HV_WATCH = 260
+ANSI_SERVICE_LIMIT_V = 254  # ANSI C84.1 Range B upper edge on 240 V; informational only
 DEFAULT_HV_ACT = 264
 
 # Options
@@ -80,9 +81,7 @@ TEMP_THRESHOLDS = {
     "battery": (45, 55),
     "cell": (45, 55),
 }
-OPT_TEMP_IMBALANCE = "temp_imbalance"
 OPT_TEMP_UNIT = "temp_unit"  # "f" or "c"; defaults to the Home Assistant unit system
-DEFAULT_TEMP_IMBALANCE = 3.0
 
 WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 DEFAULT_WEEKLY_DAY = "sun"

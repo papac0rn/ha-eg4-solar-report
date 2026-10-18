@@ -59,7 +59,6 @@ from .const import (
     PERIOD_7_DAYS,
     PERIOD_TODAY,
     TEMP_THRESHOLDS,
-    OPT_TEMP_IMBALANCE,
     OPT_TEMP_UNIT,
     SERVERS,
     base_url_for,
@@ -219,12 +218,11 @@ class ReportManager:
             "service_charge": data.get(CONF_SERVICE_CHARGE),
             "utility_name": data.get(CONF_UTILITY_NAME) or "your utility",
             "nominal_voltage": data.get(CONF_NOMINAL_VOLTAGE),
-            "hv_watch": data.get(CONF_HV_WATCH),
-            "hv_act": data.get(CONF_HV_ACT),
+            "hv_watch": opts.get(CONF_HV_WATCH) or data.get(CONF_HV_WATCH),
+            "hv_act": opts.get(CONF_HV_ACT) or data.get(CONF_HV_ACT),
             "known_issues": opts.get(OPT_KNOWN_ISSUES, ""),
             # From the EG4 Web Monitor integration when installed; otherwise the analyzer infers it
             "soc_floor": ha_eg4.soc_floor(self.hass, data[CONF_INVERTERS][0]),
-            "temp_imbalance": opts.get(OPT_TEMP_IMBALANCE),
             "temp_unit": opts.get(OPT_TEMP_UNIT)
             or ("f" if self.hass.config.units.temperature_unit == UnitOfTemperature.FAHRENHEIT else "c"),
             **{

@@ -60,7 +60,8 @@
         "data_description": {
           "service_charge": "Left out of the solar value, since you pay it either way.",
           "utility_name": "Used in advice such as asking your utility about line voltage.",
-          "hv_act": "Typical grid-tie over-voltage trip is 110% of nominal (264 V on 240 V). Check your inverter's setting."
+          "hv_act": "Typical grid-tie over-voltage trip is 110% of nominal (264 V on 240 V). Check your inverter's setting.",
+          "hv_watch": "Watch when line voltage gets this close to the trip. 260 V is 4 V under a 264 V trip."
         }
       },
       "reauth_confirm": {
@@ -132,7 +133,9 @@
           "pack_count": "Number of battery packs",
           "pack_discharge_a": "Discharge limit per pack",
           "temp_unit": "Temperature unit",
-          "report_location": "Report location"
+          "report_location": "Report location",
+          "hv_watch": "High-voltage Watch threshold",
+          "hv_act": "High-voltage Act threshold (inverter trip)"
         },
         "data_description": {
           "weekly_day": "The weekly report covers the 7 days ending on this day.",
@@ -143,7 +146,9 @@
           "battery_kwh": "Found at setup from the EG4 integration or the battery itself. 0 works it out from the log.",
           "pack_discharge_a": "0 learns it from the log (the highest limit seen, divided by the pack count).",
           "temp_unit": "Used for every temperature in the report and its chart.",
-          "report_location": "Where the report page goes. Changing it adds the report there; it doesn't remove it from the old place."
+          "report_location": "Where the report page goes. Changing it adds the report there; it doesn't remove it from the old place.",
+          "hv_watch": "Watch when line voltage gets this close to the trip. 260 V is 4 V under a 264 V trip.",
+          "hv_act": "Typical grid-tie over-voltage trip is 110% of nominal (264 V on 240 V). Check your inverter's setting."
         }
       },
       "temperatures": {
@@ -157,12 +162,10 @@
           "temp_battery_watch": "Battery (BT) Watch at",
           "temp_battery_act": "Battery (BT) Act at",
           "temp_cell_watch": "Battery cells Watch at",
-          "temp_cell_act": "Battery cells Act at",
-          "temp_imbalance": "Heatsink 1 overnight imbalance Watch at"
+          "temp_cell_act": "Battery cells Act at"
         },
         "data_description": {
-          "temp_heatsink_watch": "A normal summer peak can reach about 93 °C, so the default leaves room above it.",
-          "temp_imbalance": "How much warmer heatsink 1 may sit than heatsinks 2 and 3 overnight, with no PV, before it points to airflow or a fan."
+          "temp_heatsink_watch": "A normal summer peak can reach about 93 °C, so the default leaves room above it."
         }
       }
     }

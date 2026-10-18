@@ -28,8 +28,8 @@ A real example, from a 4-day stretch where one battery pack had dropped offline:
 >
 > - 🔴 **Battery pack offline: 3 of 4 packs.** The discharge limit read 600 A instead of 800 A until 12:49 on Aug 26,
 >   when the missing pack rejoined.
-> - 🔴 **Grid voltage, every sunny day.** Over 254 V for hours each afternoon while exporting, peaking at 260.9 V.
-> - 🟡 **Airflow/fan on heatsink 1.** Overnight, with no solar, heatsink 1 sits 10 °F warmer than the other two.
+> - 🟡 **Grid voltage within 3.1 V of the inverter trip.** It peaked at 260.9 V while exporting 14 kW; the inverter
+>   disconnects at 264 V.
 > - 🟡 **16 kW AC clipping.** The inverter sat at its output ceiling on sunny afternoons.
 
 Every report also has a stat grid (harvest per MPPT, house load, export, import, value, battery, grid volts, heatsink),

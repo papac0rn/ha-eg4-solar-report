@@ -222,7 +222,7 @@ class Eg4SolarReportCard extends HTMLElement {
 
     const daily = `<section><h2>Day by day</h2><div class="tbl"><table class="wide">
       <tr><th>Day</th><th>PV kWh</th>${labels.map((l, i) => `<th class="m${i + 1}">${esc(l)}</th>`).join("")}
-        <th>Peak kW</th><th>Load</th><th>Export</th><th>Import</th><th>SOC %</th><th>V max</th><th>h &gt; limit</th><th>Clip min</th></tr>
+        <th>Peak kW</th><th>Load</th><th>Export</th><th>Import</th><th>SOC %</th><th>V max</th><th>h &gt; 254 V</th><th>Clip min</th></tr>
       ${(a.daily || []).map((d) => `<tr><td>${esc(d.day)}${d.through ? ` <span class="note">to ${esc(d.through)}</span>` : ""}</td>
         <td>${esc(d.pv)}</td>${(d.arrays || []).map((v) => `<td>${esc(v)}</td>`).join("")}
         <td>${esc(d.peak_kw)}</td><td>${esc(d.load)}</td><td>${esc(d.export)}</td><td>${esc(d.import)}</td>
