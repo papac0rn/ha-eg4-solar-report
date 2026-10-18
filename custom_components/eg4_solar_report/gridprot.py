@@ -23,7 +23,7 @@ KEYS = (
 # Register ranges that hold them (the same three ranges the Monitor Center's parameter page reads)
 READ_RANGES = ((0, 127), (127, 127), (240, 127))
 
-# Raw time units, confirmed against a live FlexBOSS21 read before release (see TIME_UNIT_S use below)
+# Times are in 10 ms units: a live FlexBOSS21 read gives 1300 / 16 for the IEEE 1547 Cat III 13 s / 0.16 s stages
 TIME_UNIT_S = 0.01
 
 
@@ -34,16 +34,21 @@ def _num(v: Any) -> float | None:
         return None
 
 
-def _volts(raw: Any, nominal_v: float) -> float | None:
-    """Volts on the report's line-to-line basis; None when the value doesn't look like a grid voltage."""
+def _volts(raw: Any, nominal_v: float, high: bool = True) -> float | None:
+    """Volts on the report's line-to-line basis; None when the value doesn't look like a grid voltage.
+
+    The Monitor Center returns volts (a FlexBOSS21 read gives "264"); a value over 1000 is taken as 0.1 V units.
+    Only a HIGH limit below nominal can be a per-leg value; low limits go down to 0.5 pu (120 V on 240 V).
+    """
     v = _num(raw)
     if v is None or v <= 0:
         return None
     if v > 1000:  # register value in 0.1 V
         v /= 10
-    if nominal_v >= 200 and 0.4 * nominal_v <= v <= 0.75 * nominal_v:  # per-leg limit on a split-phase system
+    if high and nominal_v >= 200 and 0.4 * nominal_v <= v <= 0.75 * nominal_v:  # per-leg limit on split phase
         v *= 2
-    return round(v, 1) if 0.5 * nominal_v <= v <= 1.5 * nominal_v else None
+    lo = 0.9 * nominal_v if high else 0.3 * nominal_v
+    return round(v, 1) if lo <= v <= 1.5 * nominal_v else None
 
 
 def _seconds(raw: Any) -> float | None:
@@ -67,7 +72,7 @@ def interpret(raw: dict[str, Any] | None, nominal_v: float = 240.0) -> dict[str,
             stages.append({"stage": n, "volts": v, "seconds": t, "enabled": t is None or t > 0})
     low = []
     for n in STAGES:
-        v = _volts(raw.get(f"HOLD_GRID_VOLT_LIMIT{n}_LOW"), nominal_v)
+        v = _volts(raw.get(f"HOLD_GRID_VOLT_LIMIT{n}_LOW"), nominal_v, high=False)
         if v is not None:
             low.append({"stage": n, "volts": v, "seconds": _seconds(raw.get(f"HOLD_GRID_VOLT_LIMIT{n}_LOW_TIME"))})
     enabled = [s for s in stages if s["enabled"]]
@@ -84,7 +89,7 @@ def interpret(raw: dict[str, Any] | None, nominal_v: float = 240.0) -> dict[str,
         "stages": stages,
         "low_stages": low,
         "mov_avg_high": _volts(raw.get("HOLD_GRID_VOLT_MOV_AVG_HIGH"), nominal_v),
-        "connect_low": _volts(raw.get("HOLD_GRID_VOLT_CONN_LOW"), nominal_v),
+        "connect_low": _volts(raw.get("HOLD_GRID_VOLT_CONN_LOW"), nominal_v, high=False),
         "connect_high": _volts(raw.get("HOLD_GRID_VOLT_CONN_HIGH"), nominal_v),
         "reconnect_s": _num(raw.get("HOLD_RECONNECT_TIME")),
         "volt_watt": {

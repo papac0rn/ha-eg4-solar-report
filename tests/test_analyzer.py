@@ -398,3 +398,20 @@ def test_no_write_path_in_the_read_code():
     for name in ("gridprot.py", "api.py"):
         text = (root / name).read_text(encoding="utf-8")
         assert "write_parameter" not in text and "set_" not in text, name
+
+
+def test_gridprot_live_flexboss21_block():
+    """The block a real FlexBOSS21 returned (IEEE 1547 Category III settings), volts and 10 ms units."""
+    raw = {"HOLD_GRID_VOLT_LIMIT1_HIGH": "264", "HOLD_GRID_VOLT_LIMIT1_HIGH_TIME": "1300",
+           "HOLD_GRID_VOLT_LIMIT2_HIGH": "288", "HOLD_GRID_VOLT_LIMIT2_HIGH_TIME": "16",
+           "HOLD_GRID_VOLT_LIMIT1_LOW": "211.2", "HOLD_GRID_VOLT_LIMIT1_LOW_TIME": "2100",
+           "HOLD_GRID_VOLT_LIMIT2_LOW": "120", "HOLD_GRID_VOLT_LIMIT2_LOW_TIME": "200",
+           "HOLD_GRID_VOLT_MOV_AVG_HIGH": "264", "HOLD_GRID_VOLT_CONN_LOW": "220", "HOLD_GRID_VOLT_CONN_HIGH": "252",
+           "HOLD_RECONNECT_TIME": "300"}
+    gp = gridprot.interpret(raw, 240)
+    assert gp["trip"] == {"stage": 1, "volts": 264.0, "seconds": 13.0, "enabled": True}
+    assert gp["stages"][1]["seconds"] == 0.16
+    assert [s["volts"] for s in gp["low_stages"]] == [211.2, 120.0]  # 0.5 pu low limit is not doubled
+    assert gp["low_stages"][0]["seconds"] == 21.0
+    assert (gp["connect_low"], gp["connect_high"], gp["mov_avg_high"]) == (220.0, 252.0, 264.0)
+    assert gp["volt_watt"] == {"enabled": None, "points": []}
