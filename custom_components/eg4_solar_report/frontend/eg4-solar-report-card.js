@@ -22,6 +22,7 @@ const CSS = `
 .page{background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13.5px;line-height:1.55;
   padding:18px 16px 36px;font-variant-numeric:tabular-nums;border-radius:var(--ha-card-border-radius,12px)}
 .wrap{max-width:1040px;margin-inline:auto;display:flex;flex-direction:column;gap:22px}
+.wrap>*{min-width:0}
 header{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:6px 24px;border-bottom:1px solid var(--rule);padding-bottom:10px}
 header .ttl{font-size:clamp(18px,2.6vw,24px);font-weight:600;letter-spacing:.02em}
 header .id{letter-spacing:.14em;text-transform:uppercase;color:var(--dim);font-size:11.5px}
@@ -180,7 +181,7 @@ class Eg4SolarReportCard extends HTMLElement {
       <header>
         <div>
           <div class="ttl">${a.period === "7 days" ? "Week review" : a.period === "Today" ? "Day review" : "Solar Report"}</div>
-          <div class="id"><b>${esc(range)}</b>${a.samples ? ` · ${Number(a.samples).toLocaleString()} samples @ ${esc(a.interval_min)} min` : ""}</div>
+          <div class="id"><b>${esc(range)}</b>${a.samples ? ` · ${Number(a.samples).toLocaleString()} samples @ ${esc(a.interval_min)} min` : ""}${a.firmware ? ` · FW ${esc(a.firmware)}` : ""}</div>
         </div>
         ${controls}
       </header>`;
@@ -222,14 +223,14 @@ class Eg4SolarReportCard extends HTMLElement {
 
     const daily = `<section><h2>Day by day</h2><div class="tbl"><table class="wide">
       <tr><th>Day</th><th>PV kWh</th>${labels.map((l, i) => `<th class="m${i + 1}">${esc(l)}</th>`).join("")}
-        <th>Peak kW</th><th>Load</th><th>Export</th><th>Import</th><th>SOC %</th><th>V max</th><th>h &gt; 254 V</th><th>Clip min</th></tr>
+        <th>Peak kW</th><th>Load</th><th>Export</th><th>Import</th><th>Self %</th><th>SOC %</th><th>V max</th><th>h &gt; 254 V</th><th>Clip min</th></tr>
       ${(a.daily || []).map((d) => `<tr><td>${esc(d.day)}${d.through ? ` <span class="note">to ${esc(d.through)}</span>` : ""}</td>
         <td>${esc(d.pv)}</td>${(d.arrays || []).map((v) => `<td>${esc(v)}</td>`).join("")}
-        <td>${esc(d.peak_kw)}</td><td>${esc(d.load)}</td><td>${esc(d.export)}</td><td>${esc(d.import)}</td>
+        <td>${esc(d.peak_kw)}</td><td>${esc(d.load)}</td><td>${esc(d.export)}</td><td>${esc(d.import)}</td><td>${d.self_pct == null ? "–" : esc(d.self_pct)}</td>
         <td>${esc(d.soc_min)}–${esc(d.soc_max)}</td><td class="${d.h_over > 0 ? "hot" : ""}">${esc(d.v_max)}</td>
         <td>${esc(d.h_over)}</td><td>${esc(d.clip_min)}</td></tr>`).join("")}
       ${a.totals ? `<tr class="tot"><td>Total</td><td>${esc(a.totals.pv)}</td>${(a.totals.arrays || []).map((v) => `<td>${esc(v)}</td>`).join("")}
-        <td></td><td>${esc(a.totals.load)}</td><td>${esc(a.totals.export)}</td><td>${esc(a.totals.import)}</td><td></td><td></td>
+        <td></td><td>${esc(a.totals.load)}</td><td>${esc(a.totals.export)}</td><td>${esc(a.totals.import)}</td><td>${a.totals.self_pct == null ? "" : esc(a.totals.self_pct)}</td><td></td><td></td>
         <td>${esc(a.totals.h_over)}</td><td>${esc(a.totals.clip_min)}</td></tr>` : ""}
       </table></div></section>`;
 

@@ -32,7 +32,7 @@ A real example, from a 4-day stretch where one battery pack had dropped offline:
 >   disconnects at 264 V.
 > - 🟡 **16 kW AC clipping.** The inverter sat at its output ceiling on sunny afternoons.
 
-Every report also has a stat grid (harvest per MPPT, house load, export, import, value, battery, grid volts, heatsink),
+Every report also has a stat grid (harvest per MPPT, house load, export, import, self-sufficiency, value, battery SOC against its floor, backup hours, battery cycles, round trip, grid volts, heatsink),
 an alarm panel, a temperature panel, a day-by-day table, seven charts, and a numbered "What to do" list.
 
 ## Install (about 10 minutes)

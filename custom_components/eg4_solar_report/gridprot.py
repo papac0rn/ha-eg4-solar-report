@@ -18,6 +18,8 @@ KEYS = (
     "HOLD_CONNECT_TIME",
     "HOLD_RECONNECT_TIME",
     "FUNC_VOLT_WATT_EN",
+    "HOLD_DISCHG_CUT_OFF_SOC_EOD",    # on-grid discharge floor, %
+    "HOLD_SOC_LOW_LIMIT_EPS_DISCHG",  # off-grid (outage) discharge cut-off, %
     *(f"HOLD_VW_{x}{n}" for x in ("V", "P") for n in (1, 2, 3, 4)),
 )
 # Register ranges that hold them (the same three ranges the Monitor Center's parameter page reads)

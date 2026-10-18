@@ -83,7 +83,7 @@ def test_day_shape(day_report):
     assert day_report["interval_min"] == 4.0
     assert len(day_report["checks"]) == 21
     assert sum(day_report["counts"].values()) == 21
-    assert len(day_report["stats"]) == 12
+    assert len(day_report["stats"]) == 15
     assert "_chart_series" in day_report
 
 
@@ -415,3 +415,73 @@ def test_gridprot_live_flexboss21_block():
     assert gp["low_stages"][0]["seconds"] == 21.0
     assert (gp["connect_low"], gp["connect_high"], gp["mov_avg_high"]) == (220.0, 252.0, 264.0)
     assert gp["volt_watt"] == {"enabled": None, "points": []}
+
+
+# --- Rev F: what it means for the house
+
+def _day_report(extra=None):
+    content = (FIXTURES / "day-2026-09-26.xls").read_bytes()
+    return analyzer.build_report({"anon": [content]}, {**SETTINGS, **(extra or {})}, DAY, DAY)
+
+
+def _stat(report, label):
+    return next(s for s in report["stats"] if s["label"] == label)
+
+
+def test_backup_readiness_uses_the_off_grid_cutoff_and_night_load():
+    r = _day_report({"off_grid_cutoff": 2, "off_grid_cutoff_source": "inverter", "soc_floor": 20, "battery_kwh": 64.3})
+    b = r["backup"]
+    assert b["cutoff"] == 2 and b["cutoff_source"] == "inverter"
+    assert b["night_kw"] == pytest.approx(1.69, abs=0.02)
+    assert b["kwh"] == pytest.approx((99 - 2) / 100 * 64.3, abs=0.1)
+    assert b["hours"] == pytest.approx(b["kwh"] / b["night_kw"], abs=0.2)
+    assert b["floor_hours"] == pytest.approx((20 - 2) / 100 * 64.3 / b["night_kw"], abs=0.2)
+    tile = _stat(r, "Backup now")
+    assert tile["value"] == f"{b['hours']:.0f} h" and "at 20 % floor" in tile["sub"] and "assumed" not in tile["sub"]
+    note = next(f for f in r["findings"] if f["id"] == "note_backup")
+    assert "outage load-shedding is not counted" in note["detail"]
+
+
+def test_backup_cutoff_falls_back_to_assumed_10():
+    r = _day_report({"battery_kwh": 64.3})
+    assert r["backup"]["cutoff"] == 10 and r["backup"]["cutoff_source"] == "assumed"
+    assert "(10 % cutoff assumed)" in _stat(r, "Backup now")["sub"]
+
+
+def test_self_sufficiency_tile_and_column():
+    r = _day_report()
+    assert _stat(r, "Self-sufficiency")["value"] == "95.1 %"
+    assert r["daily"][0]["self_pct"] == 95.1
+    d = analyzer.build_report({"anon": [(FIXTURES / "pack-dropout-2026-08-24_27.xls").read_bytes()]}, SETTINGS,
+                              date(2026, 8, 24), date(2026, 8, 27))
+    assert [x["self_pct"] for x in d["daily"]] == [95.6, 100.0, 90.9, 96.3]
+
+
+def test_soc_tile_shows_the_low_and_the_floor():
+    r = _day_report({"soc_floor": 20})
+    tile = _stat(r, "Battery SOC")
+    assert tile["value"] == "46 → 100 %"
+    assert "low Sep 26 08:44" in tile["sub"] and "floor 20 %" in tile["sub"] and "floor not reached" in tile["sub"]
+    r = _day_report({"soc_floor": 46})
+    assert "reached the floor on 1 night (reserve held)" in _stat(r, "Battery SOC")["sub"]
+    # No floor known and none held in the log: just the low
+    assert _stat(_day_report(), "Battery SOC")["sub"] == "low Sep 26 08:44"
+
+
+def test_battery_cycles_period_and_lifetime():
+    r = _day_report({"battery_kwh": 64.3})
+    chg = r["daily"][0]["charge"]
+    assert r["cycles"]["period"] == round(chg / 64.3, 1)
+    _h, rows = analyzer.parse_export((FIXTURES / "day-2026-09-26.xls").read_bytes())
+    life = max(analyzer._num(x["eChgAll"]) for x in rows)
+    assert r["cycles"]["lifetime"] == round(life / 64.3) == 115  # eChgAll, not the BMS CycleCnt (which reads 0)
+    assert _stat(r, "Battery cycles")["sub"].endswith("115 lifetime")
+
+
+def test_firmware_in_report_and_change_chip():
+    r = _day_report({"firmware": "FAAB-2727"})
+    assert r["firmware"] == "FAAB-2727"
+    assert not any(c["label"].startswith("Firmware") for c in r["chips"])
+    r = _day_report({"firmware": "FAAB-2801", "firmware_changed": {"from": "FAAB-2727", "to": "FAAB-2801", "date": "Oct 20"}})
+    chip = next(c for c in r["chips"] if c["label"].startswith("Firmware"))
+    assert chip == {"label": "Firmware changed FAAB-2727 → FAAB-2801 (Oct 20)", "status": "info"}

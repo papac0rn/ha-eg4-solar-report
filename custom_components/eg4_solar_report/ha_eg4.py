@@ -48,6 +48,21 @@ def battery_bank(hass: HomeAssistant, serial: str) -> dict[str, float | None] | 
     }
 
 
+def off_grid_cutoff(hass: HomeAssistant, serial: str) -> float | None:
+    """The inverter's off-grid SOC cut-off, how low the bank goes during an outage."""
+    return _find(hass, "number", serial, "_off_grid_soc_cut_off")
+
+
+def firmware(hass: HomeAssistant, serial: str) -> str | None:
+    """The inverter firmware version from the EG4 Web Monitor integration, e.g. FAAB-2727."""
+    key = serial.lower()
+    for state in hass.states.async_all("sensor"):
+        if key in state.entity_id and state.entity_id.endswith("_firmware_version"):
+            if state.state not in ("unknown", "unavailable", ""):
+                return state.state
+    return None
+
+
 def soc_floor(hass: HomeAssistant, serial: str) -> float | None:
     """The inverter's on-grid SOC cut-off, the floor the bank discharges to."""
     return _find(hass, "number", serial, "_on_grid_soc_cut_off")

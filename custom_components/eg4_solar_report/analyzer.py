@@ -327,6 +327,7 @@ class Ctx:
     grid_prot: dict[str, Any] | None = None
     battery_kwh: float | None = None
     soc_floor: float | None = None
+    soc_floor_source: str = ""
     notes: list[Check] = field(default_factory=list)
     chart_notes: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
@@ -427,6 +428,7 @@ def _build_ctx(log: Log, settings: dict[str, Any], start: date, end: date) -> Ct
             "load": round(inv + imp - export, 1),
             "export": round(export, 1),
             "import": round(imp, 1),
+            "self_pct": round((1 - imp / (inv + imp - export)) * 100, 1) if inv + imp - export > 0 else None,
             "charge": round(day_max("eChgDay"), 1),
             "discharge": round(day_max("eDisChgDay"), 1),
             "soc_min": min(socs) if socs else None,
@@ -437,7 +439,11 @@ def _build_ctx(log: Log, settings: dict[str, Any], start: date, end: date) -> Ct
         })
 
     ctx.battery_kwh = float(settings["battery_kwh"]) if settings.get("battery_kwh") else _infer_capacity(log)
-    ctx.soc_floor = float(settings["soc_floor"]) if settings.get("soc_floor") else _infer_soc_floor(log)
+    if settings.get("soc_floor"):
+        ctx.soc_floor, ctx.soc_floor_source = float(settings["soc_floor"]), "inverter"
+    else:
+        ctx.soc_floor = _infer_soc_floor(log)
+        ctx.soc_floor_source = "seen in the log" if ctx.soc_floor is not None else ""
     return ctx
 
 
@@ -1250,6 +1256,9 @@ def _notes(c: Ctx) -> list[Check]:
                                detail=f"{c.array_names[0]}'s share of harvest rose "
                                       + " → ".join(f"{s:.1f}" for s in shares[-4:])
                                       + " %, as expected while the sun gets lower."))
+    bn = backup_note(c)
+    if bn:
+        notes.append(bn)
     return notes
 
 
@@ -1418,6 +1427,114 @@ def apply_known_issues(checks: list[Check], known_ids: set[str]) -> list[Check]:
     return checks
 
 
+def self_sufficiency_tile(c: Ctx) -> dict[str, str]:
+    load = sum(d["load"] for d in c.daily)
+    imp = sum(d["import"] for d in c.daily)
+    pct = (load - imp) / load * 100 if load > 0 else None
+    return {"label": "Self-sufficiency", "value": f"{pct:.1f} %" if pct is not None else "–",
+            "sub": f"{imp:.1f} of {load:.0f} kWh from the grid" if pct is not None else ""}
+
+
+def _floor_nights(c: Ctx) -> int:
+    """Nights the bank reached its floor (a morning before noon belongs to the night before)."""
+    if c.soc_floor is None:
+        return 0
+    nights = {(ts - timedelta(hours=12)).date() for ts, v in zip(c.log.t, c.log.f("SOC(%)"))
+              if v is not None and v <= c.soc_floor + 0.5}
+    return len(nights)
+
+
+def soc_tile(c: Ctx) -> dict[str, str]:
+    soc = c.log.f("SOC(%)")
+    low, low_t, _i = _min_at(c.log.t, soc)
+    top = max(_vals(soc) or [0])
+    if low is None:
+        return {"label": "Battery SOC", "value": "–", "sub": ""}
+    parts = [f"low {_day(low_t)} {_hm(low_t)}"]
+    if c.soc_floor is not None:
+        n = _floor_nights(c)
+        parts.append(f"floor {c.soc_floor:g} %" + ("" if c.soc_floor_source == "inverter" else " (seen in the log)"))
+        parts.append(f"reached the floor on {n} night{'s' if n != 1 else ''} (reserve held)" if n else "floor not reached")
+    return {"label": "Battery SOC", "value": f"{low:.0f} → {top:.0f} %", "sub": " · ".join(parts)}
+
+
+def _night_load_kw(c: Ctx) -> float | None:
+    vals = [v for ts, v in zip(c.log.t, c.log.kw("pLoad")) if v is not None and (ts.hour >= 19 or ts.hour < 7)]
+    return statistics.fmean(vals) if len(vals) >= 6 else None
+
+
+def backup_readiness(c: Ctx) -> dict[str, Any] | None:
+    """Hours the bank would carry the house now, and at the on-grid floor, at the period's normal overnight load."""
+    soc = _vals(c.log.f("SOC(%)"))
+    load = _night_load_kw(c)
+    if not soc or not c.battery_kwh or not load:
+        return None
+    raw_cut = c.settings.get("off_grid_cutoff")
+    cutoff = float(raw_cut) if raw_cut is not None else 10.0
+    source = c.settings.get("off_grid_cutoff_source") or ("inverter" if raw_cut is not None else "assumed")
+    now = soc[-1]
+    usable = max(now - cutoff, 0) / 100 * c.battery_kwh
+    out = {"soc": now, "cutoff": cutoff, "cutoff_source": source, "night_kw": round(load, 2),
+           "kwh": round(usable, 1), "hours": round(usable / load, 1)}
+    if c.soc_floor is not None and c.soc_floor > cutoff:
+        floor_kwh = (c.soc_floor - cutoff) / 100 * c.battery_kwh
+        out["floor"], out["floor_hours"] = c.soc_floor, round(floor_kwh / load, 1)
+    return out
+
+
+def backup_tile(c: Ctx) -> dict[str, str]:
+    b = backup_readiness(c)
+    if not b:
+        return {"label": "Backup now", "value": "–", "sub": "needs battery capacity and load"}
+    parts = [f"{b['kwh']:.0f} kWh" + (f" ({b['cutoff']:g} % cutoff assumed)" if b["cutoff_source"] == "assumed" else "")]
+    if "floor_hours" in b:
+        parts.append(f"at {b['floor']:g} % floor: {b['floor_hours']:.0f} h")
+    parts.append(f"{b['night_kw']:.1f} kW night load")
+    return {"label": "Backup now", "value": f"{b['hours']:.0f} h", "sub": " · ".join(parts)}
+
+
+def backup_note(c: Ctx) -> Check | None:
+    b = backup_readiness(c)
+    if not b:
+        return None
+    cut = f"the {b['cutoff']:g} % outage cutoff" + (" (assumed; the inverter's value wasn't available)"
+                                                   if b["cutoff_source"] == "assumed" else "")
+    detail = (f"At {b['soc']:.0f} % the bank holds {b['kwh']:.0f} kWh above {cut}. At this period's normal overnight "
+              f"load of {b['night_kw']:.2f} kW that is about {b['hours']:.0f} hours.")
+    if "floor_hours" in b:
+        detail += (f" Even at the {b['floor']:g} % on-grid floor, the lowest it normally runs to, it would carry about "
+                   f"{b['floor_hours']:.0f} hours.")
+    detail += " This is at normal overnight load; outage load-shedding is not counted."
+    return Check("note_backup", "info", "", title="Backup readiness", detail=detail)
+
+
+def _firmware_chips(settings: dict[str, Any]) -> list[dict[str, str]]:
+    ch = settings.get("firmware_changed") or {}
+    if ch.get("from") and ch.get("to"):
+        return [{"label": f"Firmware changed {ch['from']} → {ch['to']} ({ch.get('date', '')})".replace(" ()", ""),
+                 "status": "info"}]
+    return []
+
+
+def battery_cycles(c: Ctx) -> dict[str, Any] | None:
+    if not c.battery_kwh:
+        return None
+    chg = sum(d["charge"] for d in c.daily)
+    life_col = _vals(c.log.f("eChgAll"))
+    return {"period": round(chg / c.battery_kwh, 1),
+            "lifetime": round(max(life_col) / c.battery_kwh) if life_col else None}
+
+
+def cycles_tile(c: Ctx) -> dict[str, str]:
+    chg = sum(d["charge"] for d in c.daily)
+    dis = sum(d["discharge"] for d in c.daily)
+    cy = battery_cycles(c)
+    if not cy:
+        return {"label": "Battery cycles", "value": "–", "sub": f"{chg:.0f} kWh in · {dis:.0f} out"}
+    life = f" · {cy['lifetime']:,} lifetime" if cy["lifetime"] is not None else ""
+    return {"label": "Battery cycles", "value": f"{cy['period']:.1f}", "sub": f"{chg:.0f} kWh in · {dis:.0f} out{life}"}
+
+
 def _stats(c: Ctx) -> list[dict[str, str]]:
     log, daily = c.log, c.daily
     pv = sum(d["pv"] for d in daily)
@@ -1442,13 +1559,15 @@ def _stats(c: Ctx) -> list[dict[str, str]]:
     stats.append({"label": "Exported", "value": f"{export:.0f} kWh",
                   "sub": f"{export / pv * 100:.0f} % of harvest" if pv else ""})
     stats.append({"label": "Imported", "value": f"{imp:.1f} kWh",
-                  "sub": f"{(1 - imp / load) * 100:.1f} % self-supplied" if load else ""})
+                  "sub": f"≈ ${imp * rate:.2f} at {rate * 100:.1f}¢" if rate else ""})
+    stats.append(self_sufficiency_tile(c))
     avoided, credit_v = (load - imp) * rate, export * credit
     stats.append({"label": "Value", "value": f"≈ ${avoided + credit_v:.0f}",
                   "sub": f"${avoided:.0f} avoided + ${credit_v:.0f} export credit"})
     socs = _vals(log.f("SOC(%)"))
-    stats.append({"label": "Battery SOC", "value": f"{min(socs):.0f} → {max(socs):.0f} %" if socs else "–",
-                  "sub": f"{chg:.0f} kWh in · {dis:.0f} out"})
+    stats.append(soc_tile(c))
+    stats.append(backup_tile(c))
+    stats.append(cycles_tile(c))
     rt = None
     if chg and c.battery_kwh and socs:
         gained = (socs[-1] - socs[0]) / 100 * c.battery_kwh
@@ -1597,6 +1716,8 @@ def build_report(
         "load": round(sum(d["load"] for d in c.daily), 1),
         "export": round(sum(d["export"] for d in c.daily), 1),
         "import": round(sum(d["import"] for d in c.daily), 1),
+        "self_pct": (round((1 - sum(d["import"] for d in c.daily) / sum(d["load"] for d in c.daily)) * 100, 1)
+                     if sum(d["load"] for d in c.daily) > 0 else None),
         "h_over": round(sum(d["h_over"] for d in c.daily), 1),
         "clip_min": sum(d["clip_min"] for d in c.daily),
     }
@@ -1606,7 +1727,7 @@ def build_report(
         "verdict": verdict,
         "summary": summary,
         "detail": detail,
-        "chips": _chips(checks, alarm_rows),
+        "chips": _chips(checks, alarm_rows) + _firmware_chips(settings),
         "range": {"start": start.isoformat(), "end": end.isoformat()},
         "through": log.t[-1].isoformat(),
         "samples": len(log),
@@ -1620,6 +1741,9 @@ def build_report(
         "mppt": mppt_rows(c),
         "battery_kwh": c.battery_kwh,
         "thresholds": thresholds,
+        "firmware": settings.get("firmware"),
+        "backup": backup_readiness(c),
+        "cycles": battery_cycles(c),
         "counts": counts,
         "checks": [x.table_row() for x in checks],
         "findings": [x.finding() for x in ordered] + [x.finding() for x in notes],

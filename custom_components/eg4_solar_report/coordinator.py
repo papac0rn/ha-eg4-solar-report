@@ -87,6 +87,9 @@ class ReportManager:
         self.report: dict[str, Any] | None = None
         # The inverter's grid-protection parameters (read-only), refreshed on each report run
         self.grid_protection_raw: dict[str, Any] = {}
+        # Last firmware seen, and the most recent change, so a behaviour shift can be tied to an update
+        self.firmware: str | None = None
+        self.firmware_changed: dict[str, str] | None = None
         self.error: str | None = None
         self.last_generated: datetime | None = None
         self.charts: dict[str, bytes] = charts.render_placeholders()
@@ -118,6 +121,8 @@ class ReportManager:
         if not saved:
             return
         self.report = saved.get("report")
+        self.firmware = saved.get("firmware")
+        self.firmware_changed = saved.get("firmware_changed")
         self.period = saved.get("period", self.period)
         if saved.get("last_generated"):
             self.last_generated = dt_util.parse_datetime(saved["last_generated"])
@@ -132,6 +137,8 @@ class ReportManager:
             "period": self.period,
             "last_generated": self.last_generated.isoformat() if self.last_generated else None,
             "charts": {k: v.decode("utf-8") for k, v in self.charts.items()},
+            "firmware": self.firmware,
+            "firmware_changed": self.firmware_changed,
         })
 
     @callback
@@ -199,6 +206,29 @@ class ReportManager:
             return end - timedelta(days=6), end
         return end, end
 
+    def _param(self, name: str) -> float | None:
+        try:
+            return float(self.grid_protection_raw[name])
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    def _soc_floor(self) -> float | None:
+        """The on-grid floor. A value above 60 % is a temporary raise (EV protect, storm hold), not the normal floor,
+        so the report falls back to the inverter parameter or to the floor seen in the log."""
+        serial = self.entry.data[CONF_INVERTERS][0]
+        for value in (ha_eg4.soc_floor(self.hass, serial), self._param("HOLD_DISCHG_CUT_OFF_SOC_EOD")):
+            if value is not None and 0 < value <= 60:
+                return value
+        return None
+
+    def _off_grid_cutoff(self) -> dict[str, Any]:
+        value = ha_eg4.off_grid_cutoff(self.hass, self.entry.data[CONF_INVERTERS][0])
+        if value is None:
+            value = self._param("HOLD_SOC_LOW_LIMIT_EPS_DISCHG")
+        if value is None or not 0 <= value <= 90:
+            return {"off_grid_cutoff": None, "off_grid_cutoff_source": "assumed"}
+        return {"off_grid_cutoff": value, "off_grid_cutoff_source": "inverter"}
+
     def _settings(self) -> dict[str, Any]:
         data, opts = self.entry.data, self.entry.options
         names = [n.strip() for n in data.get(CONF_ARRAY_NAMES, "").split(",") if n.strip()]
@@ -226,7 +256,10 @@ class ReportManager:
             "grid_protection": gridprot.interpret(self.grid_protection_raw, float(data.get(CONF_NOMINAL_VOLTAGE) or 240)),
             "known_issues": opts.get(OPT_KNOWN_ISSUES, ""),
             # From the EG4 Web Monitor integration when installed; otherwise the analyzer infers it
-            "soc_floor": ha_eg4.soc_floor(self.hass, data[CONF_INVERTERS][0]),
+            "soc_floor": self._soc_floor(),
+            **self._off_grid_cutoff(),
+            "firmware": self.firmware,
+            "firmware_changed": self.firmware_changed,
             "temp_unit": opts.get(OPT_TEMP_UNIT)
             or ("f" if self.hass.config.units.temperature_unit == UnitOfTemperature.FAHRENHEIT else "c"),
             **{
@@ -259,6 +292,11 @@ class ReportManager:
                     raw = {}
                 if raw:
                     self.grid_protection_raw = raw
+                fw = ha_eg4.firmware(self.hass, self.entry.data[CONF_INVERTERS][0])
+                if fw and self.firmware and fw != self.firmware:
+                    self.firmware_changed = {"from": self.firmware, "to": fw, "date": dt_util.now().strftime("%b %d")}
+                if fw:
+                    self.firmware = fw
                 settings = self._settings()
                 report = await self.hass.async_add_executor_job(
                     analyzer.build_report, exports, settings, start, end
