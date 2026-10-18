@@ -51,7 +51,7 @@ def test_cards_render_with_a_report():
     text = "\n".join(_render_all(report, report["verdict"]))
     assert 'alert-type="warning"' in text
     assert "MPPT1" in text and "116.6" in text
-    assert "Airflow/fan" not in text and "Peak 259.9 V · 4.1 V below the 264 V trip" in text
+    assert "Airflow/fan" not in text and "Peak 259.9 V · 4.1 V below the 264 V trip (assumed)" in text
     assert "Packs (4/4 online)" in text
 
 

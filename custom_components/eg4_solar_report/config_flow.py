@@ -399,8 +399,8 @@ class Eg4SolarReportConfigFlow(ConfigFlow, domain=DOMAIN):
                     vol.Required(CONF_SERVICE_CHARGE, default=0.0): _number(0, 1000, 0.01, "$/month"),
                     vol.Optional(CONF_UTILITY_NAME): str,
                     vol.Required(CONF_NOMINAL_VOLTAGE, default=DEFAULT_NOMINAL_VOLTAGE): _number(100, 480, 1, "V"),
-                    vol.Required(CONF_HV_WATCH, default=DEFAULT_HV_WATCH): _number(100, 500, 1, "V"),
-                    vol.Required(CONF_HV_ACT, default=DEFAULT_HV_ACT): _number(100, 500, 1, "V"),
+                    vol.Required(CONF_HV_WATCH, default=DEFAULT_HV_WATCH): _number(0, 500, 1, "V"),
+                    vol.Required(CONF_HV_ACT, default=DEFAULT_HV_ACT): _number(0, 500, 1, "V"),
                 }
             ),
         )
@@ -509,8 +509,8 @@ class Eg4SolarReportOptionsFlow(OptionsFlow):
         schema[vol.Required(CONF_BATTERY_KWH, default=opts.get(CONF_BATTERY_KWH, data.get(CONF_BATTERY_KWH, 0)))] = _number(0, 1000, 0.1, "kWh")
         schema[vol.Required(CONF_PACK_COUNT, default=opts.get(CONF_PACK_COUNT, data.get(CONF_PACK_COUNT, DEFAULT_PACK_COUNT)))] = _number(1, 64, 1)
         schema[vol.Required(CONF_PACK_DISCHARGE_A, default=opts.get(CONF_PACK_DISCHARGE_A, data.get(CONF_PACK_DISCHARGE_A, 0)))] = _number(0, 1000, 1, "A")
-        schema[vol.Required(CONF_HV_WATCH, default=opts.get(CONF_HV_WATCH, data.get(CONF_HV_WATCH, DEFAULT_HV_WATCH)))] = _number(100, 500, 1, "V")
-        schema[vol.Required(CONF_HV_ACT, default=opts.get(CONF_HV_ACT, data.get(CONF_HV_ACT, DEFAULT_HV_ACT)))] = _number(100, 500, 1, "V")
+        schema[vol.Required(CONF_HV_WATCH, default=opts.get(CONF_HV_WATCH, data.get(CONF_HV_WATCH, DEFAULT_HV_WATCH)))] = _number(0, 500, 1, "V")
+        schema[vol.Required(CONF_HV_ACT, default=opts.get(CONF_HV_ACT, data.get(CONF_HV_ACT, DEFAULT_HV_ACT)))] = _number(0, 500, 1, "V")
         schema[vol.Required(OPT_REPORT_LOCATION, default=opts.get(OPT_REPORT_LOCATION, data.get(OPT_REPORT_LOCATION, TARGET_NEW)))] = _location_selector(self.hass)
         schema[vol.Required(OPT_TEMP_UNIT, default=opts.get(OPT_TEMP_UNIT, _default_unit(self.hass)))] = SelectSelector(
             SelectSelectorConfig(options=["f", "c"], translation_key="temp_unit", mode=SelectSelectorMode.LIST)

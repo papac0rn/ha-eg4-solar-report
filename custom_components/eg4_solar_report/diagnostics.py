@@ -15,6 +15,7 @@ from .const import (
     CONF_UTILITY_NAME,
     DOMAIN,
 )
+from . import gridprot
 from .coordinator import ReportManager
 
 TO_REDACT = {CONF_USERNAME, CONF_PASSWORD, CONF_PLANT_ID, CONF_PLANT_NAME, CONF_INVERTERS, CONF_UTILITY_NAME}
@@ -36,6 +37,12 @@ async def async_get_config_entry_diagnostics(
             "period": manager.period,
             "end_date": manager.end_date.isoformat(),
             "last_generated": manager.last_generated.isoformat() if manager.last_generated else None,
+        },
+        "grid_protection": {
+            "raw": manager.grid_protection_raw,
+            "interpreted": gridprot.interpret(
+                manager.grid_protection_raw, float(entry.data.get("nominal_voltage") or 240)
+            ),
         },
         "report": {
             "range": report.get("range"),

@@ -17,7 +17,7 @@ from homeassistant.helpers.event import (
 )
 from homeassistant.util import dt as dt_util
 
-from . import analyzer, charts, ha_eg4
+from . import analyzer, charts, gridprot, ha_eg4
 from .api import Eg4AuthError, Eg4Error, Eg4MonitorClient
 from .const import (
     DOMAIN,
@@ -85,6 +85,8 @@ class ReportManager:
         self.period: str = PERIOD_TODAY
         self.end_date: date = dt_util.now().date()
         self.report: dict[str, Any] | None = None
+        # The inverter's grid-protection parameters (read-only), refreshed on each report run
+        self.grid_protection_raw: dict[str, Any] = {}
         self.error: str | None = None
         self.last_generated: datetime | None = None
         self.charts: dict[str, bytes] = charts.render_placeholders()
@@ -218,8 +220,10 @@ class ReportManager:
             "service_charge": data.get(CONF_SERVICE_CHARGE),
             "utility_name": data.get(CONF_UTILITY_NAME) or "your utility",
             "nominal_voltage": data.get(CONF_NOMINAL_VOLTAGE),
-            "hv_watch": opts.get(CONF_HV_WATCH) or data.get(CONF_HV_WATCH),
-            "hv_act": opts.get(CONF_HV_ACT) or data.get(CONF_HV_ACT),
+            # An option, even 0 (automatic), wins over the value saved at setup
+            "hv_watch": opts[CONF_HV_WATCH] if CONF_HV_WATCH in opts else data.get(CONF_HV_WATCH),
+            "hv_act": opts[CONF_HV_ACT] if CONF_HV_ACT in opts else data.get(CONF_HV_ACT),
+            "grid_protection": gridprot.interpret(self.grid_protection_raw, float(data.get(CONF_NOMINAL_VOLTAGE) or 240)),
             "known_issues": opts.get(OPT_KNOWN_ISSUES, ""),
             # From the EG4 Web Monitor integration when installed; otherwise the analyzer infers it
             "soc_floor": ha_eg4.soc_floor(self.hass, data[CONF_INVERTERS][0]),
@@ -248,12 +252,20 @@ class ReportManager:
                 for serial in self.entry.data[CONF_INVERTERS]:
                     # One workbook per inverter, one sheet per day
                     exports[serial] = [await self.client.async_download_export(serial, start, end)]
+                try:
+                    raw = await self.client.async_read_grid_protection(self.entry.data[CONF_INVERTERS][0])
+                except Eg4Error as err:
+                    _LOGGER.debug("Grid-protection read failed: %s", err)
+                    raw = {}
+                if raw:
+                    self.grid_protection_raw = raw
                 settings = self._settings()
                 report = await self.hass.async_add_executor_job(
                     analyzer.build_report, exports, settings, start, end
                 )
                 rendered = await self.hass.async_add_executor_job(
-                    charts.render_all, report.pop("_chart_series", report.get("series")), settings
+                    charts.render_all, report.pop("_chart_series", report.get("series")),
+                    {**settings, **report.get("thresholds", {})},
                 )
             except Exception as err:  # noqa: BLE001 - any failure becomes the red error state
                 if isinstance(err, (Eg4Error, analyzer.AnalyzerError)):

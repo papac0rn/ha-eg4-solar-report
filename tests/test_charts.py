@@ -77,7 +77,7 @@ def test_all_seven_charts_render_well_formed():
 def test_thresholds_are_drawn():
     rendered = charts.render_all(_week_series(), SETTINGS)
     assert b"16 kW AC ceiling" in rendered["pv_ac"]
-    assert b"260 V" in rendered["grid_voltage"] and b"264 V typical trip" in rendered["grid_voltage"]
+    assert b"260 V" in rendered["grid_voltage"] and b"264 V trip" in rendered["grid_voltage"]
     assert b"254 V ANSI" in rendered["grid_voltage"]
     assert b"20 % floor" in rendered["soc"]
     assert b"3.65 V cell limit" in rendered["cell_voltage"]

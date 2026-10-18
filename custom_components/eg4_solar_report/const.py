@@ -57,9 +57,11 @@ SYSTEM_PROFILES = {
 }
 EMPTY_PROFILE = {"mppt_limits_a": "", "pv_max_v": 0, "output_ceiling_kw": 0}
 DEFAULT_NOMINAL_VOLTAGE = 240
-DEFAULT_HV_WATCH = 260
+DEFAULT_HV_WATCH = 0  # 0 = automatic: 4 V under the trip
+HV_WATCH_MARGIN_V = 4
+ASSUMED_TRIP_V = 264  # IEEE 1547 Cat II OV1 (1.10 pu) when the inverter's own setting can't be read
 ANSI_SERVICE_LIMIT_V = 254  # ANSI C84.1 Range B upper edge on 240 V; informational only
-DEFAULT_HV_ACT = 264
+DEFAULT_HV_ACT = 0  # 0 = automatic: the inverter's lowest enabled over-voltage stage
 
 # Options
 OPT_WEEKLY_ENABLED = "weekly_enabled"

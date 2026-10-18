@@ -107,6 +107,27 @@ class Eg4MonitorClient:
             raise Eg4Error("The Monitor Center did not return an .xls export")
         return content
 
+    async def async_read_grid_protection(self, serial: str) -> dict[str, Any]:
+        """Read the inverter's grid-protection parameters (read-only; this client never writes).
+
+        Returns only the names in gridprot.KEYS that the inverter reports; families differ, so any can be missing.
+        A failed read returns {} and the report falls back to assumed limits.
+        """
+        from .gridprot import KEYS, READ_RANGES
+
+        found: dict[str, Any] = {}
+        for start, count in READ_RANGES:
+            try:
+                resp = await self._client.api.control.read_parameters(serial, start, count)
+            except LuxpowerAuthError as err:
+                raise Eg4AuthError(str(err)) from err
+            except (LuxpowerError, aiohttp.ClientError, TimeoutError, ValueError) as err:
+                _LOGGER.debug("Grid-protection read %s+%s failed: %s", start, count, err)
+                continue
+            params = getattr(resp, "parameters", None) or {}
+            found.update({k: v for k, v in params.items() if k in KEYS})
+        return found
+
     async def async_close(self) -> None:
         # The HA-managed session is closed by HA; this only drops the client's own state
         try:

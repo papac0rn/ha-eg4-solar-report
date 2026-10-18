@@ -23,7 +23,8 @@ from datetime import date, datetime, timedelta
 from typing import Any, Callable, Sequence
 
 from . import codes
-from .const import ANSI_SERVICE_LIMIT_V, DEFAULT_HV_ACT, DEFAULT_HV_WATCH, TEMP_THRESHOLDS
+from .const import ANSI_SERVICE_LIMIT_V, ASSUMED_TRIP_V, HV_WATCH_MARGIN_V, TEMP_THRESHOLDS
+from .gridprot import stage_text
 
 SEVERITY_ORDER = {"ok": 0, "info": 1, "watch": 2, "act": 3}
 
@@ -319,12 +320,47 @@ class Ctx:
     import_kw: list[float | None] = field(default_factory=list)
     nominal_v: float = 240.0
     nominal_f: float = 60.0
-    hv_watch: float = float(DEFAULT_HV_WATCH)
-    hv_act: float = float(DEFAULT_HV_ACT)
+    hv_watch: float = float(ASSUMED_TRIP_V - HV_WATCH_MARGIN_V)
+    hv_act: float = float(ASSUMED_TRIP_V)
+    trip_source: str = "assumed"  # read from inverter / your setting / assumed
+    trip_seconds: float | None = None
+    grid_prot: dict[str, Any] | None = None
     battery_kwh: float | None = None
     soc_floor: float | None = None
     notes: list[Check] = field(default_factory=list)
     chart_notes: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+
+
+def _set_voltage_limits(ctx: Ctx, settings: dict[str, Any]) -> None:
+    """The trip is the user's setting if given, else the inverter's lowest enabled over-voltage stage, else 264 V."""
+    gp = settings.get("grid_protection") or None
+    ctx.grid_prot = gp
+    user_act = _num(settings.get("hv_act")) or 0
+    trip = (gp or {}).get("trip")
+    if user_act > 0:
+        ctx.hv_act, ctx.trip_source = user_act, "your setting"
+    elif trip:
+        ctx.hv_act, ctx.trip_source, ctx.trip_seconds = trip["volts"], "read from inverter", trip.get("seconds")
+    else:
+        ctx.hv_act, ctx.trip_source = float(ASSUMED_TRIP_V), "assumed"
+    user_watch = _num(settings.get("hv_watch")) or 0
+    ctx.hv_watch = user_watch if user_watch > 0 else ctx.hv_act - HV_WATCH_MARGIN_V
+
+
+def _rolling_mean(t: list[datetime], v: list[float | None], minutes: float) -> tuple[float | None, datetime | None]:
+    """Highest trailing average over `minutes` (the window the inverter's moving-average limit uses)."""
+    best, best_t, j = None, None, 0
+    total, n = 0.0, 0
+    for i, x in enumerate(v):
+        if x is not None:
+            total, n = total + x, n + 1
+        while (t[i] - t[j]).total_seconds() > minutes * 60:
+            if v[j] is not None:
+                total, n = total - v[j], n - 1
+            j += 1
+        if n and (best is None or total / n > best):
+            best, best_t = total / n, t[i]
+    return best, best_t
 
 
 def _build_ctx(log: Log, settings: dict[str, Any], start: date, end: date) -> Ctx:
@@ -338,8 +374,7 @@ def _build_ctx(log: Log, settings: dict[str, Any], start: date, end: date) -> Ct
         ctx.partial[d] = (last - first).total_seconds() < 20 * 3600
 
     ctx.nominal_v = float(settings.get("nominal_voltage") or 240)
-    ctx.hv_watch = float(settings.get("hv_watch") or DEFAULT_HV_WATCH)
-    ctx.hv_act = float(settings.get("hv_act") or DEFAULT_HV_ACT)
+    _set_voltage_limits(ctx, settings)
     fac = _vals(log.f("fac"))
     ctx.nominal_f = 50.0 if fac and statistics.median(fac) < 55 else 60.0
 
@@ -511,21 +546,58 @@ def rule_grid_high_voltage(c: Ctx) -> Check:
     if fit:
         facts.append(("Fit", f"{fit[0]:.1f} V + {fit[1]:.2f} V per kW exported"))
 
+    gp = c.grid_prot or {}
+    if gp:
+        for st in gp.get("stages", []):
+            facts.append((f"Over-voltage stage {st['stage']}", stage_text(st) + ("" if st["enabled"] else " (off)")))
+        if gp.get("mov_avg_high"):
+            facts.append(("Moving-average limit", f"{gp['mov_avg_high']:.1f} V"))
+        if gp.get("connect_low") and gp.get("connect_high"):
+            facts.append(("Reconnect window", f"{gp['connect_low']:.1f}–{gp['connect_high']:.1f} V"
+                          + (f" after {gp['reconnect_s']:g} s" if gp.get("reconnect_s") else "")))
+        vw = gp.get("volt_watt") or {}
+        if vw.get("points"):
+            start_v = vw["points"][0]["volts"]
+            state = {True: "on", False: "off", None: "set"}[vw.get("enabled")]
+            facts.append(("Volt-watt curve", f"{state}, starts at {start_v:.1f} V"))
+
     # An inverter grid over-voltage code: W017 while the line is on the high side of nominal
     ov_hits = [i for i in _bit_samples(c, [17], need_all=False)
                if vacr[i] is not None and vacr[i] >= 1.05 * c.nominal_v]
     margin = c.hv_act - peak
-    result = (f"Peak {peak:.1f} V · {margin:.1f} V below the {c.hv_act:g} V trip" if margin > 0
-              else f"Peak {peak:.1f} V · at or above the {c.hv_act:g} V trip")
-    context = (" Volt-watt curtailment, if enabled in the inverter, can trim export at high voltage."
-               if peak > ANSI_SERVICE_LIMIT_V else "")
+    trip_txt = (f"the inverter's {c.hv_act:.1f} V" + (f" / {c.trip_seconds:g} s" if c.trip_seconds is not None else "")
+                + " trip") if c.trip_source == "read from inverter" else f"the {c.hv_act:g} V trip"
+    result = (f"Peak {peak:.1f} V · {margin:.1f} V below {trip_txt} ({c.trip_source})" if margin > 0
+              else f"Peak {peak:.1f} V · at or above {trip_txt} ({c.trip_source})")
+
+    # The inverter's rolling-average limit (10 minutes, per IEEE 1547) trips on a sustained high average
+    avg_hit = ""
+    if gp.get("mov_avg_high"):
+        avg, avg_t = _rolling_mean(log.t, [v if ok else None for v, ok in zip(vacr, c.grid_ok)], 10)
+        if avg is not None:
+            facts.append(("Highest 10-min average", f"{avg:.1f} V at {_day(avg_t)} {_hm(avg_t)}"))
+            if avg >= gp["mov_avg_high"] - 2:
+                avg_hit = (f" The 10-minute average reached {avg:.1f} V on {_day(avg_t)} at {_hm(avg_t)}, within "
+                           f"{gp['mov_avg_high'] - avg:.1f} V of the inverter's {gp['mov_avg_high']:.1f} V moving-average limit.")
+
+    vw = gp.get("volt_watt") or {}
+    vw_start = vw["points"][0]["volts"] if vw.get("points") else None
+    if vw.get("enabled") and vw_start and peak > vw_start:
+        facts.append(("Volt-watt", f"Export may be curtailed above {vw_start:.1f} V"))
+        context = f" The inverter's volt-watt curve starts at {vw_start:.1f} V, so export may have been trimmed at the peak."
+    elif vw.get("enabled") is False:
+        context = ""
+    else:
+        context = (" Volt-watt curtailment, if enabled in the inverter, can trim export at high voltage."
+                   if peak > ANSI_SERVICE_LIMIT_V else "")
+
     if peak >= c.hv_act or ov_hits:
         severity = "act"
-    elif peak >= c.hv_watch:
+    elif peak >= c.hv_watch or avg_hit:
         severity = "watch"
     else:
         detail = (f"The highest line voltage was {peak:.1f} V on {_day(peak_t)} at {_hm(peak_t)}, {margin:.1f} V below "
-                  f"the {c.hv_act:g} V point where the inverter disconnects." + context)
+                  f"the {c.hv_act:g} V point where the inverter disconnects ({c.trip_source})." + context)
         return Check("grid_high_voltage", "ok", result, detail=detail, facts=facts)
 
     slope_txt = ""
@@ -543,12 +615,15 @@ def rule_grid_high_voltage(c: Ctx) -> Check:
         detail = (f"Line voltage reached {peak:.1f} V on {_day(peak_t)} at {_hm(peak_t)}"
                   + (f" with {export_at_peak:.1f} kW of export" if export_at_peak else "")
                   + f". At {c.hv_act:g} V the inverter disconnects from the grid after about 2 seconds.")
-    else:
+    elif peak >= c.hv_watch:
         title = f"Grid voltage within {margin:.1f} V of the inverter trip"
         detail = (f"Line voltage peaked at {peak:.1f} V on {_day(peak_t)} at {_hm(peak_t)}"
                   + (f" with {export_at_peak:.1f} kW of export" if export_at_peak else "")
-                  + f", {margin:.1f} V below the {c.hv_act:g} V trip.")
-    detail += slope_txt + context
+                  + f", {margin:.1f} V below the {c.hv_act:g} V trip ({c.trip_source}).")
+    else:
+        title = "Grid voltage average near the inverter's limit"
+        detail = f"Line voltage peaked at {peak:.1f} V, {margin:.1f} V below the {c.hv_act:g} V trip."
+    detail += avg_hit + slope_txt + context
     actions = [
         f"Check the inverter's grid over-voltage setting: confirm the trip is at {c.hv_act:g} V and how long it waits "
         "before disconnecting.",
@@ -1498,6 +1573,7 @@ def build_report(
     c = _build_ctx(log, settings, start, end)
     checks = [rule(c) for rule in RULES]
     occ = {"fault": code_occurrences(c, "fault"), "warning": code_occurrences(c, "warning"), "bms": bms_occurrences(c)}
+    thresholds = {"hv_watch": c.hv_watch, "hv_act": c.hv_act, "trip_source": c.trip_source, "trip_seconds": c.trip_seconds}
     known = {s.strip() for s in settings.get("known_issues", "").split(",") if s.strip()}
     apply_known_issues(checks, known)
     notes = _notes(c)
@@ -1543,6 +1619,7 @@ def build_report(
         "codes": occ["fault"] + occ["warning"] + occ["bms"],
         "mppt": mppt_rows(c),
         "battery_kwh": c.battery_kwh,
+        "thresholds": thresholds,
         "counts": counts,
         "checks": [x.table_row() for x in checks],
         "findings": [x.finding() for x in ordered] + [x.finding() for x in notes],

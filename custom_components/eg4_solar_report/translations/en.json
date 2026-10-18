@@ -60,8 +60,8 @@
         "data_description": {
           "service_charge": "Left out of the solar value, since you pay it either way.",
           "utility_name": "Used in advice such as asking your utility about line voltage.",
-          "hv_act": "Typical grid-tie over-voltage trip is 110% of nominal (264 V on 240 V). Check your inverter's setting.",
-          "hv_watch": "Watch when line voltage gets this close to the trip. 260 V is 4 V under a 264 V trip."
+          "hv_act": "0 = automatic: read from your inverter's own over-voltage setting (264 V is assumed if it can't be read). Set a voltage only to override it.",
+          "hv_watch": "0 = automatic: 4 V under the trip. Or set a voltage."
         }
       },
       "reauth_confirm": {
@@ -147,8 +147,8 @@
           "pack_discharge_a": "0 learns it from the log (the highest limit seen, divided by the pack count).",
           "temp_unit": "Used for every temperature in the report and its chart.",
           "report_location": "Where the report page goes. Changing it adds the report there; it doesn't remove it from the old place.",
-          "hv_watch": "Watch when line voltage gets this close to the trip. 260 V is 4 V under a 264 V trip.",
-          "hv_act": "Typical grid-tie over-voltage trip is 110% of nominal (264 V on 240 V). Check your inverter's setting."
+          "hv_watch": "0 = automatic: 4 V under the trip. Or set a voltage.",
+          "hv_act": "0 = automatic: read from your inverter's own over-voltage setting (264 V is assumed if it can't be read). Set a voltage only to override it."
         }
       },
       "temperatures": {

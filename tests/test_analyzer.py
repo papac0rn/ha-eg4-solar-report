@@ -29,8 +29,8 @@ SETTINGS = {
     "import_rate": 0.086,
     "export_credit": 0.049,
     "nominal_voltage": 240,
-    "hv_watch": 260,
-    "hv_act": 264,
+    "hv_watch": 0,  # automatic
+    "hv_act": 0,
     "utility_name": "the utility",
     "battery_kwh": 0,
     "known_issues": "",
@@ -102,7 +102,7 @@ def test_day_grid_voltage_matches_answer_key(day_report):
     assert "Time > 254 V (ANSI service limit)" in facts
     # Rev D: judged against the 264 V trip, so the day is ok and the margin is shown
     assert check.severity == "ok"
-    assert check.result == "Peak 259.9 V · 4.1 V below the 264 V trip"
+    assert check.result == "Peak 259.9 V · 4.1 V below the 264 V trip (assumed)"
     assert "Volt-watt curtailment" in check.detail
     assert _check(day_report, "grid_high_voltage")["status"] == "ok"
     assert not any(f["id"] == "grid_high_voltage" for f in day_report["findings"])
@@ -260,7 +260,7 @@ def test_voltage_261_is_watch():
         rows[_peak_row(rows)]["vacr"] = "261"
     check = analyzer.rule_grid_high_voltage(_day_ctx(edit=v))
     assert check.severity == "watch"
-    assert check.result == "Peak 261.0 V · 3.0 V below the 264 V trip"
+    assert check.result == "Peak 261.0 V · 3.0 V below the 264 V trip (assumed)"
     assert "tap" not in check.detail and all("utility" not in a for a in check.actions)
 
 
@@ -318,3 +318,83 @@ def test_per_pack_limit_is_learned_when_not_set():
     content = (FIXTURES / "pack-dropout-2026-08-24_27.xls").read_bytes()
     r = analyzer.build_report({"anon": [content]}, {**SETTINGS, "pack_discharge_a": 0}, date(2026, 8, 24), date(2026, 8, 27))
     assert _finding(r, "battery_packs_online")["title"] == "Battery pack offline: 3 of 4 packs"
+
+
+# --- Rev E: the inverter's own grid-protection settings (mocked Monitor Center parameter block)
+
+gridprot = importlib.import_module("eg4sr.gridprot")
+
+RAW = {
+    "HOLD_GRID_VOLT_LIMIT1_HIGH": "2700",       # 270.0 V, 0.1 V units
+    "HOLD_GRID_VOLT_LIMIT1_HIGH_TIME": "200",   # 2 s
+    "HOLD_GRID_VOLT_LIMIT2_HIGH": "2880",
+    "HOLD_GRID_VOLT_LIMIT2_HIGH_TIME": "16",
+    "HOLD_GRID_VOLT_LIMIT3_HIGH": "2640",       # lower, but disabled (time 0)
+    "HOLD_GRID_VOLT_LIMIT3_HIGH_TIME": "0",
+    "HOLD_GRID_VOLT_MOV_AVG_HIGH": "2610",
+    "HOLD_GRID_VOLT_CONN_LOW": "2112",
+    "HOLD_GRID_VOLT_CONN_HIGH": "2520",
+    "HOLD_RECONNECT_TIME": "300",
+    "FUNC_VOLT_WATT_EN": "1",
+    "HOLD_VW_V1": "2550", "HOLD_VW_P1": "100",
+    "HOLD_VW_V2": "2640", "HOLD_VW_P2": "20",
+}
+
+
+def _gp(raw=None):
+    return gridprot.interpret(RAW if raw is None else raw, 240)
+
+
+def test_gridprot_picks_the_lowest_enabled_stage():
+    gp = _gp()
+    assert gp["trip"] == {"stage": 1, "volts": 270.0, "seconds": 2.0, "enabled": True}
+    assert [s["enabled"] for s in gp["stages"]] == [True, True, False]
+    assert gp["mov_avg_high"] == 261.0 and gp["connect_high"] == 252.0
+    assert gp["volt_watt"]["enabled"] is True and gp["volt_watt"]["points"][0]["volts"] == 255.0
+
+
+def test_gridprot_per_leg_values_and_missing_names():
+    gp = gridprot.interpret({"HOLD_GRID_VOLT_LIMIT1_HIGH": "1320", "HOLD_GRID_VOLT_LIMIT1_HIGH_TIME": "200"}, 240)
+    assert gp["trip"]["volts"] == 264.0  # 132 V per leg on a 240 V split-phase system
+    assert gridprot.interpret({}, 240) is None
+    assert gridprot.interpret({"HOLD_GRID_VOLT_LIMIT1_HIGH": "garbage"}, 240) is None
+
+
+def test_inverter_trip_is_used_and_labelled():
+    check = analyzer.rule_grid_high_voltage(_day_ctx({"grid_protection": _gp({**RAW, "HOLD_GRID_VOLT_MOV_AVG_HIGH": "2700"})}))
+    assert check.result == "Peak 259.9 V · 10.1 V below the inverter's 270.0 V / 2 s trip (read from inverter)"
+    facts = dict(check.facts)
+    assert facts["Over-voltage stage 1"] == "270.0 V / 2 s"
+    assert facts["Over-voltage stage 3"] == "264.0 V / 0 s (off)"
+    assert facts["Reconnect window"] == "211.2–252.0 V after 300 s"
+    assert facts["Volt-watt"] == "Export may be curtailed above 255.0 V"
+    assert check.severity == "ok"  # watch is trip - 4 = 266 V
+
+
+def test_user_setting_overrides_the_inverter():
+    ctx = _day_ctx({"grid_protection": _gp(), "hv_act": 262})
+    assert ctx.hv_act == 262 and ctx.hv_watch == 258 and ctx.trip_source == "your setting"
+    assert analyzer.rule_grid_high_voltage(ctx).severity == "watch"
+
+
+def test_moving_average_near_its_limit_is_watch():
+    check = analyzer.rule_grid_high_voltage(_day_ctx({"grid_protection": _gp()}))  # avg limit 261 V
+    assert check.severity == "watch"
+    assert "moving-average limit" in check.detail
+    assert "Highest 10-min average" in dict(check.facts)
+
+
+def test_failed_read_falls_back_to_assumed():
+    ctx = _day_ctx({"grid_protection": None})
+    assert (ctx.hv_act, ctx.hv_watch, ctx.trip_source) == (264.0, 260.0, "assumed")
+
+
+def test_report_carries_effective_thresholds(day_report):
+    assert day_report["thresholds"] == {"hv_watch": 260.0, "hv_act": 264.0, "trip_source": "assumed", "trip_seconds": None}
+
+
+def test_no_write_path_in_the_read_code():
+    root = Path(__file__).parent.parent / "custom_components" / "eg4_solar_report"
+    for name in ("gridprot.py", "api.py"):
+        text = (root / name).read_text(encoding="utf-8")
+        assert "write_parameter" not in text and "set_" not in text, name
