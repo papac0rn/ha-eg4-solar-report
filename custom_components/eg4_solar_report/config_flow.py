@@ -69,6 +69,7 @@ from .const import (
     DOMAIN,
     EMPTY_PROFILE,
     OPT_KNOWN_ISSUES,
+    OPT_FLOOR_ENTITY,
     OPT_REPORT_LOCATION,
     OPT_NOTIFY_SERVICE,
     OPT_NOTIFY_SEVERITIES,
@@ -476,6 +477,8 @@ class Eg4SolarReportOptionsFlow(OptionsFlow):
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
         if user_input is not None:
             self._opts = {**self.config_entry.options, **user_input}
+            if not user_input.get(OPT_FLOOR_ENTITY):
+                self._opts.pop(OPT_FLOOR_ENTITY, None)
             return await self.async_step_temperatures()
 
         opts = self.config_entry.options
@@ -509,6 +512,12 @@ class Eg4SolarReportOptionsFlow(OptionsFlow):
         schema[vol.Required(CONF_BATTERY_KWH, default=opts.get(CONF_BATTERY_KWH, data.get(CONF_BATTERY_KWH, 0)))] = _number(0, 1000, 0.1, "kWh")
         schema[vol.Required(CONF_PACK_COUNT, default=opts.get(CONF_PACK_COUNT, data.get(CONF_PACK_COUNT, DEFAULT_PACK_COUNT)))] = _number(1, 64, 1)
         schema[vol.Required(CONF_PACK_DISCHARGE_A, default=opts.get(CONF_PACK_DISCHARGE_A, data.get(CONF_PACK_DISCHARGE_A, 0)))] = _number(0, 1000, 1, "A")
+        floor_key = (
+            vol.Optional(OPT_FLOOR_ENTITY, description={"suggested_value": opts[OPT_FLOOR_ENTITY]})
+            if opts.get(OPT_FLOOR_ENTITY)
+            else vol.Optional(OPT_FLOOR_ENTITY)
+        )
+        schema[floor_key] = EntitySelector(EntitySelectorConfig(domain=["input_number", "number", "sensor"]))
         schema[vol.Required(CONF_HV_WATCH, default=opts.get(CONF_HV_WATCH, data.get(CONF_HV_WATCH, DEFAULT_HV_WATCH)))] = _number(0, 500, 1, "V")
         schema[vol.Required(CONF_HV_ACT, default=opts.get(CONF_HV_ACT, data.get(CONF_HV_ACT, DEFAULT_HV_ACT)))] = _number(0, 500, 1, "V")
         schema[vol.Required(OPT_REPORT_LOCATION, default=opts.get(OPT_REPORT_LOCATION, data.get(OPT_REPORT_LOCATION, TARGET_NEW)))] = _location_selector(self.hass)

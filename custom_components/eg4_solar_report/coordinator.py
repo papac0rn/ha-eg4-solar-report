@@ -48,6 +48,7 @@ from .const import (
     DEFAULT_WEEKLY_TIME,
     EVENT_REPORT_GENERATED,
     OPT_KNOWN_ISSUES,
+    OPT_FLOOR_ENTITY,
     OPT_NOTIFY_SERVICE,
     OPT_NOTIFY_SEVERITIES,
     OPT_OUTAGE_DELAY,
@@ -216,6 +217,15 @@ class ReportManager:
         """The on-grid floor. A value above 60 % is a temporary raise (EV protect, storm hold), not the normal floor,
         so the report falls back to the inverter parameter or to the floor seen in the log."""
         serial = self.entry.data[CONF_INVERTERS][0]
+        chosen = self.entry.options.get(OPT_FLOOR_ENTITY)
+        if chosen:
+            state = self.hass.states.get(chosen)
+            try:
+                value = float(state.state) if state else None
+            except ValueError:
+                value = None
+            if value is not None and 0 < value <= 100:
+                return value
         for value in (ha_eg4.soc_floor(self.hass, serial), self._param("HOLD_DISCHG_CUT_OFF_SOC_EOD")):
             if value is not None and 0 < value <= 60:
                 return value

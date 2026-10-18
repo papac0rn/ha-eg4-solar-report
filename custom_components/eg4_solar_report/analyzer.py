@@ -1520,9 +1520,11 @@ def battery_cycles(c: Ctx) -> dict[str, Any] | None:
     if not c.battery_kwh:
         return None
     chg = sum(d["charge"] for d in c.daily)
-    life_col = _vals(c.log.f("eChgAll"))
+    life, life_t, _i = _max_at(c.log.t, c.log.f("eChgAll"))
     return {"period": round(chg / c.battery_kwh, 1),
-            "lifetime": round(max(life_col) / c.battery_kwh) if life_col else None}
+            "lifetime": round(life / c.battery_kwh) if life else None,
+            "lifetime_as_of": _day(life_t) if life else None,
+            "lifetime_source": "inverter charge counter (eChgAll)"}
 
 
 def cycles_tile(c: Ctx) -> dict[str, str]:
@@ -1531,7 +1533,7 @@ def cycles_tile(c: Ctx) -> dict[str, str]:
     cy = battery_cycles(c)
     if not cy:
         return {"label": "Battery cycles", "value": "–", "sub": f"{chg:.0f} kWh in · {dis:.0f} out"}
-    life = f" · {cy['lifetime']:,} lifetime" if cy["lifetime"] is not None else ""
+    life = f" · {cy['lifetime']:,} lifetime to {cy['lifetime_as_of']}" if cy["lifetime"] is not None else ""
     return {"label": "Battery cycles", "value": f"{cy['period']:.1f}", "sub": f"{chg:.0f} kWh in · {dis:.0f} out{life}"}
 
 

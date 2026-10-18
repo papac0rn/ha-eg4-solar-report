@@ -73,6 +73,7 @@ OPT_OUTAGE_DELAY = "outage_delay_minutes"
 OPT_NOTIFY_SERVICE = "notify_service"
 OPT_NOTIFY_SEVERITIES = "notify_severities"
 OPT_KNOWN_ISSUES = "known_issues"
+OPT_FLOOR_ENTITY = "floor_entity"  # optional: an entity holding the normal on-grid floor %
 OPT_REPORT_LOCATION = "report_location"  # "new", "none", or a dashboard url_path ("lovelace" = Overview)
 
 # Temperature thresholds (°C): sensor class -> (watch, act). No published FlexBOSS heatsink derate point was found

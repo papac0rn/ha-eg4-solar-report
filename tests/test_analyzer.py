@@ -475,7 +475,8 @@ def test_battery_cycles_period_and_lifetime():
     _h, rows = analyzer.parse_export((FIXTURES / "day-2026-09-26.xls").read_bytes())
     life = max(analyzer._num(x["eChgAll"]) for x in rows)
     assert r["cycles"]["lifetime"] == round(life / 64.3) == 115  # eChgAll, not the BMS CycleCnt (which reads 0)
-    assert _stat(r, "Battery cycles")["sub"].endswith("115 lifetime")
+    assert _stat(r, "Battery cycles")["sub"].endswith("115 lifetime to Sep 26")
+    assert r["cycles"]["lifetime_as_of"] == "Sep 26" and "eChgAll" in r["cycles"]["lifetime_source"]
 
 
 def test_firmware_in_report_and_change_chip():
