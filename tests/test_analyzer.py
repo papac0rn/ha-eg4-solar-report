@@ -51,9 +51,9 @@ def _finding(report: dict, check_id: str) -> dict:
     return next(f for f in report["findings"] if f["id"] == check_id)
 
 
-def test_catalog_has_21_unique_checks():
+def test_catalog_has_22_unique_checks():
     ids = [rid for rid, _group, _name in analyzer.RULE_CATALOG]
-    assert len(ids) == len(set(ids)) == 21
+    assert len(ids) == len(set(ids)) == 22
     assert [r.__name__.removeprefix("rule_") for r in analyzer.RULES] == ids
 
 
@@ -81,8 +81,8 @@ def test_parse_values():
 def test_day_shape(day_report):
     assert day_report["samples"] == 260
     assert day_report["interval_min"] == 4.0
-    assert len(day_report["checks"]) == 21
-    assert sum(day_report["counts"].values()) == 21
+    assert len(day_report["checks"]) == 22
+    assert sum(day_report["counts"].values()) == 22
     assert len(day_report["stats"]) == 15
     assert "_chart_series" in day_report
 
@@ -486,3 +486,75 @@ def test_firmware_in_report_and_change_chip():
     r = _day_report({"firmware": "FAAB-2801", "firmware_changed": {"from": "FAAB-2727", "to": "FAAB-2801", "date": "Oct 20"}})
     chip = next(c for c in r["chips"] if c["label"].startswith("Firmware"))
     assert chip == {"label": "Firmware changed FAAB-2727 → FAAB-2801 (Oct 20)", "status": "info"}
+
+
+# Array balance and open string (SPEC-025): synthetic days, no real data
+
+
+def _sun_rows(days: int, edit=None) -> list[dict]:
+    """Clear days, 5-minute samples 07:00-18:00. South is the reference; East leads in the morning, West after noon."""
+    import math
+    from datetime import datetime, timedelta
+    rows = []
+    for d in range(days):
+        day = date(2026, 6, 1) + timedelta(days=d)
+        for m in range(7 * 60, 18 * 60, 5):
+            t = datetime.combine(day, datetime.min.time()) + timedelta(minutes=m)
+            sun = math.sin(math.pi * (m - 7 * 60) / (11 * 60))
+            south = 8000 * sun
+            east = south * (0.9 - 0.04 * (t.hour - 7))
+            west = south * (0.3 + 0.05 * (t.hour - 7))
+            row = {"_t": t, "ppv1": south, "ppv2": east, "ppv3": west, "vpv1": 380.0, "vpv2": 360.0, "vpv3": 340.0}
+            if edit:
+                edit(d, t, row)
+            rows.append(row)
+    return rows
+
+
+def _arrays_ctx(rows: list[dict]) -> object:
+    t0, t1 = rows[0]["_t"].date(), rows[-1]["_t"].date()
+    return analyzer._build_ctx(analyzer.Log(rows), SETTINGS, t0, t1)
+
+
+def test_arrays_one_cloudy_afternoon_on_west_is_not_a_flag():
+    def cloud(d, t, row):
+        if d == 6 and t.hour >= 13:
+            row["ppv3"] *= 0.3
+    chk = analyzer.rule_arrays_balance(_arrays_ctx(_sun_rows(8, cloud)))
+    assert chk.severity in ("ok", "info")
+    assert chk.result == "No array stood out against its usual output"
+
+
+def test_arrays_west_at_40_percent_two_clear_days_is_watch():
+    def weak(d, t, row):
+        if d in (5, 6):
+            row["ppv3"] *= 0.4
+    chk = analyzer.rule_arrays_balance(_arrays_ctx(_sun_rows(8, weak)))
+    assert chk.severity == "watch"
+    assert "West" in chk.title and "East" not in chk.title
+    assert "compared with its own usual output at the same time of day" in chk.detail
+    assert "Cloud lowers all arrays together" not in chk.detail
+
+
+def test_arrays_east_and_west_low_together_is_not_a_flag():
+    def haze(d, t, row):
+        if d in (5, 6):
+            row["ppv2"] *= 0.4
+            row["ppv3"] *= 0.4
+    chk = analyzer.rule_arrays_balance(_arrays_ctx(_sun_rows(8, haze)))
+    assert chk.severity == "info"
+
+
+def test_arrays_too_few_days_to_compare():
+    chk = analyzer.rule_arrays_balance(_arrays_ctx(_sun_rows(3)))
+    assert chk.severity == "ok" and chk.result == "Not enough clear days to compare yet"
+
+
+def test_open_string_is_act_and_healthy_strings_are_ok():
+    assert analyzer.rule_arrays_open_string(_arrays_ctx(_sun_rows(2))).severity == "ok"
+
+    def open_west(d, t, row):
+        if d == 1 and 11 <= t.hour < 12:
+            row["vpv3"], row["ppv3"] = 2.0, 0.0
+    chk = analyzer.rule_arrays_open_string(_arrays_ctx(_sun_rows(2, open_west)))
+    assert chk.severity == "act" and "West" in chk.title

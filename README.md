@@ -7,10 +7,10 @@
 **Is my solar system healthy?** This integration answers that in plain English.
 
 It downloads your EG4 inverter's own log from the **EG4 Monitor Center** (the same data you can export from the
-website), runs **21 checks** on it, and tells you **Healthy**, **Watch** or **Act**, with what it found and what to do
+website), runs **22 checks** on it, and tells you **Healthy**, **Watch** or **Act**, with what it found and what to do
 about it. It works on today or on the last 7 days, runs on a schedule if you want, and can run itself after a power outage.
 
-> **Beta (0.1.5).** Built and tested against real FlexBOSS 21 logs. Other EG4 models should work but haven't been tried
+> **Beta (0.1.12).** Built and tested against real FlexBOSS 21 logs. Other EG4 models should work but haven't been tried
 > yet. Please [open an issue](https://github.com/papac0rn/ha-eg4-solar-report/issues) if something looks wrong.
 
 ![The Solar Report page: verdict, readouts, alarm and temperature panels, findings](images/report-top.png)
@@ -61,7 +61,7 @@ Step-by-step pictures and answers to common problems are in the **[wiki](https:/
 Good: keep it. The two work together. This one reads your battery size, pack count and SOC floor straight from that
 integration's sensors, and both use the same `pylxpweb` library at compatible versions.
 
-## The 21 checks
+## The 22 checks
 
 Each check is rated **OK**, **Info** (worth knowing), **Watch** (keep an eye on it) or **Act** (needs attention).
 
@@ -70,7 +70,7 @@ Each check is rated **OK**, **Info** (worth knowing), **Watch** (keep an eye on 
 | Grid | Outages and blips · Transient-failure signature (W016–W018) · High grid voltage · Low grid voltage · Grid frequency |
 | Battery | Pack-dropout signature (W004 + W027) · All packs online · Cell balance · Cell voltage limits · Cell temperature · State of health · Grid carrying load while the battery sits out |
 | Inverter | Fault codes · Warning codes · Heatsink temperature · Output ceiling · MPPT current · PV string voltage |
-| Arrays | Array balance (weather vs. array problem) |
+| Arrays | Array balance (each array against its own usual output in clear sun) · Open string |
 | Data | Logger gaps · Energy counter cross-check |
 
 Fault and warning codes are decoded into plain language and judged **one-off** (cleared on its own, often during a grid

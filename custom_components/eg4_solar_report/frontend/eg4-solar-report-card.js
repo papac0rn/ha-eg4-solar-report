@@ -238,7 +238,7 @@ class Eg4SolarReportCard extends HTMLElement {
       <div class="row"><span class="pill p-${esc(f.severity)}">${esc(f.group === "Note" ? "Note" : SEV[f.severity] || f.severity)}</span>
         <div class="t">${esc(f.title)}</div>
         <div class="d">${esc(f.detail)}${f.action && f.action !== "None." ? `<div class="do">→ ${esc(f.action)}</div>` : ""}</div></div>`).join("")
-      || `<div class="row"><span class="pill p-ok">OK</span><div class="t">Nothing to report</div><div class="d">All 21 checks passed.</div></div>`}
+      || `<div class="row"><span class="pill p-ok">OK</span><div class="t">Nothing to report</div><div class="d">All 22 checks passed.</div></div>`}
       </div></section>`;
 
     const imgs = CHARTS.map((k) => this._find(`_chart_${k}`)).filter(Boolean)

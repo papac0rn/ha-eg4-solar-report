@@ -2,12 +2,12 @@
 
 Pure Python with no Home Assistant imports, so the rules can be unit tested on their own.
 Rebuilt for SPEC-022 from real Monitor Center exports and the prototype's published reports (the
-original eg4_report.py was lost). RULE_CATALOG fixes the 21 check ids, groups and names.
+original eg4_report.py was lost). RULE_CATALOG fixes the 22 check ids, groups and names.
 
 Report shape (the sensor attributes and the dashboard read these keys):
 - verdict (healthy / watch / act), summary (one-sentence answer), detail (a short paragraph), chips
 - range {start, end}, samples, interval_min, through (last sample time)
-- counts {ok, info, watch, act} over the 21 checks
+- counts {ok, info, watch, act} over the 22 checks
 - checks: every check as {id, group, check, result, status}
 - findings: the checks that aren't OK, then notes, as {id, group, severity, title, detail, action, facts}
 - stats: the stat grid; daily: the day-by-day table; totals: the table's total row
@@ -49,6 +49,7 @@ RULE_CATALOG: list[tuple[str, str, str]] = [
     ("inverter_mppt_current", "Inverter", "MPPT current"),
     ("inverter_pv_voltage", "Inverter", "PV string voltage"),
     ("arrays_balance", "Arrays", "Array balance"),
+    ("arrays_open_string", "Arrays", "Open string"),
     ("data_gaps", "Data", "Logger gaps"),
     ("data_counter_crosscheck", "Data", "Energy counter cross-check"),
 ]
@@ -474,7 +475,7 @@ def _infer_soc_floor(log: Log) -> float | None:
     return low if low <= 30 and held * log.interval >= 30 else None
 
 
-# The 21 rules
+# The 22 rules
 
 
 def rule_grid_outages(c: Ctx) -> Check:
@@ -1121,37 +1122,151 @@ def rule_inverter_pv_voltage(c: Ctx) -> Check:
                  action="Check the string's panel count against the cold-weather voltage rating.")
 
 
+# Array balance compares each array with its own usual output at the same time of day, in clear sun only. MPPT1 is
+# the reference: a sample is "clear" when it makes at least CLEAR_SHARE of its best output over the trailing week.
+# East and West see cloud at different times of day, so daily totals can't be compared (SPEC-025).
+CLEAR_SHARE = 0.7
+LOW_SHARE = 0.6
+LOW_MINUTES = 30
+BASELINE_DAYS = 14
+MIN_BASELINE_DAYS = 3
+MIN_HOUR_SAMPLES = 3
+
+
+def _clear_ratios(c: Ctx) -> dict[date, list[tuple[datetime, list[float | None]]]]:
+    """Per day, the clear-sun samples as (time, [ratio of array 2.. to array 1])."""
+    ref = c.log.f("ppv1")
+    others = [c.log.f(f"ppv{k}") for k in range(2, len(c.array_names) + 1)]
+    peak = {d: max(_vals([ref[i] for i in c.day_idx[d]]) or [0]) for d in c.days}
+    out = {}
+    for n, d in enumerate(c.days):
+        top = max(peak[x] for x in c.days[max(0, n - 6):n + 1])
+        rows = []
+        if top > 1000:
+            for i in c.day_idx[d]:
+                r = ref[i]
+                if r and r > 0 and r >= CLEAR_SHARE * top:
+                    rows.append((c.log.t[i], [None if o[i] is None else o[i] / r for o in others]))
+        out[d] = rows
+    return out
+
+
+def _hourly(rows: list, k: int) -> dict[int, float]:
+    by: dict[int, list[float]] = {}
+    for t, ratios in rows:
+        if ratios[k] is not None:
+            by.setdefault(t.hour, []).append(ratios[k])
+    return {h: statistics.median(v) for h, v in by.items() if len(v) >= MIN_HOUR_SAMPLES}
+
+
+def _low_spells(c: Ctx) -> tuple[dict[tuple[date, int], tuple[datetime, datetime, float]], bool]:
+    """(day, array index from 1) -> first low spell (start, end, share of usual). Also: was any hour comparable."""
+    clear = _clear_ratios(c)
+    spells, compared = {}, False
+    for n, d in enumerate(c.days):
+        prev = c.days[max(0, n - BASELINE_DAYS):n]
+        for k in range(len(c.array_names) - 1):
+            hours = [_hourly(clear[p], k) for p in prev]
+            base = {}
+            for h in range(24):
+                v = [x[h] for x in hours if h in x]
+                if len(v) >= MIN_BASELINE_DAYS:
+                    base[h] = statistics.median(v)
+            run, shares = None, []
+            for t, ratios in clear[d]:
+                b, r = base.get(t.hour), ratios[k]
+                if b and r is not None:
+                    compared = True
+                if b and r is not None and r < LOW_SHARE * b:
+                    run = run or [t, t]
+                    run[1] = t
+                    shares.append(r / b)
+                    if (run[1] - run[0]).total_seconds() >= LOW_MINUTES * 60 and (d, k + 1) not in spells:
+                        spells[(d, k + 1)] = (run[0], run[1], statistics.median(shares))
+                else:
+                    run, shares = None, []
+    return spells, compared
+
+
 def rule_arrays_balance(c: Ctx) -> Check:
     labels = mppt_labels(c)
-    full = [d for d in c.daily if not d["partial"] and d["pv"] > 0]
-    if len(full) < 2:
-        return Check("arrays_balance", "ok", "Not enough full days to compare")
-    best = max(d["pv"] for d in full)
-    best_by_array = [max(d["arrays"][k] for d in full) or 1 for k in range(len(labels))]
-    low = [d for d in full if d["pv"] < 0.7 * best]
-    weird = []
-    for d in low:
-        ratios = [d["arrays"][k] / best_by_array[k] for k in range(len(labels))]
-        if max(ratios) - min(ratios) > 0.25:
-            weird.append((d, ratios))
-    facts = [(d["day"], " · ".join(f"{n} {d['arrays'][k] / best_by_array[k] * 100:.0f}%"
-                                   for k, n in enumerate(labels))) for d in low]
-    if weird:
-        d, ratios = weird[0]
-        k = ratios.index(min(ratios))
-        return Check("arrays_balance", "watch", f"{labels[k]} fell behind on {d['day']}",
-                     title=f"{labels[k]} underperformed on {d['day']}",
-                     detail=f"On {d['day']} {labels[k]} made {ratios[k] * 100:.0f}% of its best day while the "
-                            "others did not drop as much. Cloud lowers all arrays together, so this points at that array.",
+    if len(labels) < 2:
+        return Check("arrays_balance", "ok", "Only one array, nothing to compare")
+    spells, compared = _low_spells(c)
+    if not compared:
+        return Check("arrays_balance", "ok", "Not enough clear days to compare yet",
+                     detail="Each array is compared with its own usual output in clear sun, which needs at least "
+                            f"{MIN_BASELINE_DAYS} earlier clear days in the report.")
+    n = len(labels) - 1
+    # One array low while the others held: only that can point at the array itself.
+    single = {(d, k): v for (d, k), v in spells.items()
+              if n == 1 or not any((d, j) in spells for j in range(1, n + 1) if j != k)}
+    flagged = sorted((d, k) for d, k in single
+                     if (d - timedelta(days=1), k) in single or (d + timedelta(days=1), k) in single)
+    facts = [(f"{_day(v[0])} {_hm(v[0])}–{_hm(v[1])}", f"{labels[k]} {v[2] * 100:.0f}% of usual")
+             for (d, k), v in sorted(spells.items())]
+    if flagged:
+        k = flagged[0][1]
+        days = [d for d, kk in flagged if kk == k]
+        when = " and ".join(_day(single[(d, k)][0]) for d in days[:2])
+        share = statistics.median(single[(d, k)][2] for d in days)
+        return Check("arrays_balance", "watch", f"{labels[k]} fell behind on {when}",
+                     title=f"{labels[k]} underperformed on {when}",
+                     detail=f"In clear sun {labels[k]} made about {share * 100:.0f}% of its output, compared with its "
+                            "own usual output at the same time of day, while the other arrays held theirs. Two days "
+                            "in a row points at that array rather than the weather.",
                      action=f"Look for shading, snow, dirt or a tripped breaker on {labels[k]}.", facts=facts)
-    if low:
-        names = ", ".join(f"{d['day']} ({d['pv']:.0f} kWh)" for d in low)
-        return Check("arrays_balance", "info", f"Low days explained by weather: {names}",
-                     title="Weather explains the low days",
-                     detail="All arrays dropped together on those days, which is the signature of cloud, not of an "
-                            "array problem.",
+    if spells:
+        return Check("arrays_balance", "info", "No array stood out against its usual output",
+                     title="Short dips explained by weather",
+                     detail="Some arrays dipped below their usual output at the same time of day, but only for one "
+                            "day or together with the others. Passing cloud and haze do that.",
                      action="None.", facts=facts)
-    return Check("arrays_balance", "ok", "All arrays tracked each other every day")
+    return Check("arrays_balance", "ok", "No array stood out against its usual output")
+
+
+OPEN_STRING_V = 50
+OPEN_STRING_OTHER_V = 300
+OPEN_STRING_OTHER_KW = 1.0
+
+
+def rule_arrays_open_string(c: Ctx) -> Check:
+    labels = mppt_labels(c)
+    if len(labels) < 2:
+        return Check("arrays_open_string", "ok", "Only one array, nothing to compare")
+    t = c.log.t
+    volts = [c.log.f(f"vpv{k}") for k in range(1, len(labels) + 1)]
+    kw = [c.log.kw(f"ppv{k}") for k in range(1, len(labels) + 1)]
+    hits = []
+
+    def close(k: int, run: list[int] | None) -> None:
+        if run and (t[run[1]] - t[run[0]]).total_seconds() / 60 + c.log.interval >= LOW_MINUTES:
+            hits.append((k, run))
+
+    for k in range(len(labels)):
+        run = None
+        for i in range(len(t)):
+            mine = volts[k][i]
+            lit = any((volts[j][i] or 0) > OPEN_STRING_OTHER_V and (kw[j][i] or 0) > OPEN_STRING_OTHER_KW
+                      for j in range(len(labels)) if j != k)
+            if mine is not None and mine < OPEN_STRING_V and lit:
+                run = run or [i, i]
+                run[1] = i
+            else:
+                close(k, run)
+                run = None
+        close(k, run)
+    if not hits:
+        return Check("arrays_open_string", "ok", "Every string had voltage while the others were producing")
+    facts = [(f"{_day(t[a])} {_hm(t[a])}–{_hm(t[b])}", f"{labels[k]} under {OPEN_STRING_V} V") for k, (a, b) in hits]
+    k, (a, _b) = hits[0]
+    return Check("arrays_open_string", "act", f"{labels[k]} had no voltage on {_day(t[a])}",
+                 title=f"{labels[k]} looks disconnected",
+                 detail=f"{labels[k]} read under {OPEN_STRING_V} V for 30 minutes or more while another array was "
+                        f"above {OPEN_STRING_OTHER_V} V and making over {OPEN_STRING_OTHER_KW:g} kW. A string with sun "
+                        "on it always shows voltage, so this points at an open breaker, a blown fuse or a loose "
+                        "connector.",
+                 action=f"Check the PV disconnect, fuses and connectors for {labels[k]}.", facts=facts)
 
 
 def rule_data_gaps(c: Ctx) -> Check:
@@ -1211,11 +1326,11 @@ RULES: list[Callable[[Ctx], Check]] = [
     rule_battery_cell_temperature, rule_battery_soh, rule_battery_grid_carrying_load,
     rule_inverter_faults, rule_inverter_warnings, rule_inverter_heatsink, rule_inverter_output_ceiling,
     rule_inverter_mppt_current, rule_inverter_pv_voltage,
-    rule_arrays_balance, rule_data_gaps, rule_data_counter_crosscheck,
+    rule_arrays_balance, rule_arrays_open_string, rule_data_gaps, rule_data_counter_crosscheck,
 ]
 
 
-# Notes: things worth knowing that aren't one of the 21 checks
+# Notes: things worth knowing that aren't one of the 22 checks
 
 
 def _notes(c: Ctx) -> list[Check]:
