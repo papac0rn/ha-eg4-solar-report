@@ -80,14 +80,6 @@
           "password": "Password"
         }
       },
-      "user": {
-        "title": "EG4 Monitor Center account",
-        "description": "You already have the EG4 Web Monitor integration. This report can sign in with the same EG4 account, so you don't have to type it again.",
-        "menu_options": {
-          "reuse_web_monitor": "Use my EG4 Web Monitor account",
-          "manual": "Enter a username and password"
-        }
-      },
       "location": {
         "title": "Where should the report go?",
         "description": "The report is a page of cards: verdict, findings, charts and tables. Put it on its own dashboard, or add it as a tab to a dashboard you already use. You can change this later under Configure.",
@@ -97,18 +89,12 @@
       }
     },
     "error": {
-      "invalid_auth": "The Monitor Center rejected that username or password. Use your Monitor Center account name, which may not be your email (it is the same one the EG4 Web Monitor integration uses).",
+      "invalid_auth": "The Monitor Center rejected that username or password. Use your Monitor Center account name, which may not be your email.",
       "cannot_connect": "Could not reach the Monitor Center. Check the server and try again.",
       "no_plants": "This account has no stations.",
       "no_inverters": "No inverters were found on this station.",
       "no_arrays": "Enter at least one array name.",
-      "bad_mppt_limits": "Enter one number per array, in the same order as the names.",
-      "web_monitor_no_login": "The EG4 Web Monitor integration has no cloud login to share (it may be set up for a local connection). Enter your account below.",
-      "username_case": "EG4 rejected the login. Your username differs from the one EG4 Web Monitor uses only in capital letters or spaces. Check the first letter: phone keyboards often capitalise it.",
-      "username_differs": "EG4 rejected the login. The username isn't the one EG4 Web Monitor signs in with. Use that account name, or choose \"Use my EG4 Web Monitor account\".",
-      "password_case": "EG4 rejected the login. The username is right; the password differs only in capital letters or spaces.",
-      "password_differs": "EG4 rejected the login. The username is right but the password isn't the one EG4 Web Monitor uses.",
-      "same_login_rejected": "EG4 rejected the login, although it matches EG4 Web Monitor's. Check the Server choice: EG4 Web Monitor may use a different server."
+      "bad_mppt_limits": "Enter one number per array, in the same order as the names."
     },
     "abort": {
       "already_configured": "This station is already set up.",

@@ -18,7 +18,7 @@ def base_url_for(data) -> str:
 
 # Config entry data
 CONF_SERVER = "server"
-CONF_BASE_URL = "base_url"  # set when the account is reused from EG4 Web Monitor
+CONF_BASE_URL = "base_url"  # only in entries made by 0.1.11 or earlier; still honoured
 CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
 CONF_PLANT_ID = "plant_id"

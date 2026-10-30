@@ -81,8 +81,6 @@ from .const import (
     OPT_WEEKLY_TIME,
     SERVERS,
     base_url_for,
-    EG4_WEB_MONITOR_DOMAIN,
-    CONF_BASE_URL,
     SEVERITY_ACT,
     SEVERITY_INFO,
     SEVERITY_WATCH,
@@ -142,10 +140,8 @@ class Eg4SolarReportConfigFlow(ConfigFlow, domain=DOMAIN):
         self._battery: dict[str, Any] | None = None
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
-        """Step 1: the Monitor Center account. Offer the EG4 Web Monitor login when that integration is set up."""
-        if self.hass.config_entries.async_entries(EG4_WEB_MONITOR_DOMAIN):
-            return self.async_show_menu(step_id="user", menu_options=["reuse_web_monitor", "manual"])
-        return await self.async_step_manual()
+        """Step 1: the Monitor Center account."""
+        return await self.async_step_manual(user_input)
 
     async def _async_try_account(self, account: dict[str, Any]) -> str | None:
         """Sign in and list stations; returns an error key, or None when it worked."""
@@ -170,51 +166,12 @@ class Eg4SolarReportConfigFlow(ConfigFlow, domain=DOMAIN):
         self._data.update(account)
         return None
 
-    def _explain_rejection(self, typed: dict[str, Any]) -> str:
-        """When EG4 Web Monitor's account signs in fine, say how the typed one differs. Never shows either login."""
-        entries = self.hass.config_entries.async_entries(EG4_WEB_MONITOR_DOMAIN)
-        stored = entries[0].data if entries else {}
-        user, password = stored.get(CONF_USERNAME), stored.get(CONF_PASSWORD)
-        if not user or not password:
-            return "invalid_auth"
-        typed_user = str(typed.get(CONF_USERNAME, ""))
-        if typed_user.strip() != user:
-            same_but_case = typed_user.strip().casefold() == user.strip().casefold()
-            _LOGGER.warning("Typed EG4 username differs from EG4 Web Monitor's (%s)",
-                            "only in capital letters or spaces" if same_but_case else "a different name")
-            return "username_case" if same_but_case else "username_differs"
-        if typed.get(CONF_PASSWORD) != password:
-            typed_pw = str(typed.get(CONF_PASSWORD, ""))
-            close = typed_pw.strip() == password.strip() or typed_pw.casefold() == password.casefold()
-            _LOGGER.warning("Typed EG4 password differs from EG4 Web Monitor's (%s)",
-                            "only in capitals or spaces" if close else "different")
-            return "password_case" if close else "password_differs"
-        _LOGGER.warning("Typed EG4 login matches EG4 Web Monitor's but was rejected; the server choice may differ")
-        return "same_login_rejected"
-
-    async def async_step_reuse_web_monitor(self, user_input: dict[str, Any] | None = None):
-        """Use the account the EG4 Web Monitor integration already signs in with, so nobody retypes it."""
-        source = self.hass.config_entries.async_entries(EG4_WEB_MONITOR_DOMAIN)[0].data
-        if not source.get(CONF_USERNAME) or not source.get(CONF_PASSWORD):
-            return await self.async_step_manual(error="web_monitor_no_login")
-        account = {
-            CONF_SERVER: DEFAULT_SERVER,
-            CONF_USERNAME: source[CONF_USERNAME],
-            CONF_PASSWORD: source[CONF_PASSWORD],
-        }
-        if source.get(CONF_BASE_URL):
-            account[CONF_BASE_URL] = source[CONF_BASE_URL]
-        error = await self._async_try_account(account)
-        if error:
-            return await self.async_step_manual(error=error)
-        return await self.async_step_plant()
-
     async def async_step_manual(self, user_input: dict[str, Any] | None = None, error: str | None = None):
         """Type the Monitor Center account in."""
         errors: dict[str, str] = {"base": error} if error else {}
         if user_input is not None:
             if err := await self._async_try_account(user_input):
-                errors["base"] = self._explain_rejection(user_input) if err == "invalid_auth" else err
+                errors["base"] = err
             else:
                 return await self.async_step_plant()
 
@@ -533,6 +490,9 @@ class Eg4SolarReportOptionsFlow(OptionsFlow):
             stored = {k: _from_unit(v, unit) for k, v in user_input.items()}
             # temp_imbalance (removed in 0.1.6) may still be stored; drop it so it isn't carried forward
             kept = {k: v for k, v in self._opts.items() if k != "temp_imbalance"}
+            # Saving here is how an admin puts the report back where they chose (setup re-places it on reload)
+            data = {k: v for k, v in self.config_entry.data.items() if k != "report_placed_at"}
+            self.hass.config_entries.async_update_entry(self.config_entry, data=data)
             return self.async_create_entry(data={**kept, **stored})
 
         opts = self.config_entry.options

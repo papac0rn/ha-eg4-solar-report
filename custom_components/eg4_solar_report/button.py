@@ -136,7 +136,11 @@ class GenerateReportButton(ReportEntity, ButtonEntity):
 
 
 class CreateDashboardButton(ReportEntity, ButtonEntity):
-    """Rebuilds the report wherever the owner chose to put it (Configure → Report location)."""
+    """Creates or rebuilds the integration's own Solar Report dashboard, and nothing else.
+
+    Any user can press a button, so it never writes a dashboard the integration didn't create. A report tab on
+    another dashboard is placed by an admin from the config or options flow (Configure → Report location).
+    """
 
     _attr_name = "Create Dashboard"
     _attr_icon = "mdi:view-dashboard-edit"
@@ -146,8 +150,12 @@ class CreateDashboardButton(ReportEntity, ButtonEntity):
         super().__init__(manager, entry, "create_dashboard")
 
     async def async_press(self) -> None:
-        target = report_location(self._entry)
-        await async_place_report(self.hass, self._entry, TARGET_NEW if target == TARGET_NONE else target)
+        if report_location(self._entry) not in (TARGET_NEW, TARGET_NONE):
+            raise HomeAssistantError(
+                "Your report is a tab on another dashboard. An admin can rebuild it under Settings → Devices & "
+                "services → EG4 Solar Report → Configure: save the settings and the tab is put back."
+            )
+        await async_create_dashboard(self.hass, self._entry)
 
 
 def report_location(entry: ConfigEntry) -> str:
