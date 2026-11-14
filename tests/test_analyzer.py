@@ -558,3 +558,16 @@ def test_open_string_is_act_and_healthy_strings_are_ok():
             row["vpv3"], row["ppv3"] = 2.0, 0.0
     chk = analyzer.rule_arrays_open_string(_arrays_ctx(_sun_rows(2, open_west)))
     assert chk.severity == "act" and "West" in chk.title
+
+
+def test_cold_derate_is_not_a_dropout():
+    """Nov 14: cold cells (14 °C) cut the discharge limit to 320 A while the charge limit stayed at 800 A.
+    All four packs were online, so this is a derate (info), not 'pack offline' (act)."""
+    content = (FIXTURES / "cold-derate-2026-11-14.xls").read_bytes()
+    r = analyzer.build_report({"anon": [content]}, SETTINGS, date(2026, 11, 14), date(2026, 11, 14))
+    f = _finding(r, "battery_packs_online")
+    assert f["severity"] == "info"
+    assert f["title"] == "Cold batteries limited discharge to 320 A"
+    assert "not a dropout" in f["detail"]
+    assert "offline" not in f["title"].lower()
+    assert r["verdict"] != "act"

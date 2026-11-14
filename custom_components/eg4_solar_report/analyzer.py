@@ -713,9 +713,19 @@ def rule_battery_packs_online(c: Ctx) -> Check:
         return Check("battery_packs_online", "ok",
                      f"Discharge limit {expected:g} A all {'week' if len(c.days) > 1 else 'day'}"
                      + (f": all {packs} packs reporting" if packs else ""))
+    # A missing pack cuts the charge and discharge limits to the same value (or both to 0 on a comm loss).
+    # A BMS derate (cold cells, low SOC) cuts only the discharge limit while every pack stays online.
+    chg = c.log.f("maxChgCurr")
+    if any(v is not None for v in chg):
+        dropped = [i for i in low if chg[i] is not None and chg[i] < expected * 0.97
+                   and abs(limit[i] - chg[i]) <= expected * 0.03]
+        if not dropped:
+            first, last, worst = c.log.t[low[0]], c.log.t[low[-1]], min(limit[i] for i in low)
+            return _discharge_derate(c, low, limit, expected, worst, first, last, low[-1] + 1 < len(limit))
+        low = dropped
     first, last, worst = c.log.t[low[0]], c.log.t[low[-1]], min(limit[i] for i in low)
-    online = int(round(worst / per)) if per else None
     recovered = low[-1] + 1 < len(limit)
+    online = int(round(worst / per)) if per else None
     packs_txt = f"{online} of {packs} packs" if online is not None and packs else f"{worst:g} A"
     when = ("from the start of the range" if low[0] == 0 else f"from {_day(first)} {_hm(first)}")
     detail = (f"The BMS discharge limit should read {expected:g} A with all {packs or ''} packs online. It read "
@@ -730,13 +740,48 @@ def rule_battery_packs_online(c: Ctx) -> Check:
         "battery_packs_online", "act",
         f"Discharge limit {worst:g} A ({packs_txt}) for {_hours(len(low) * c.log.interval)}"
         + (", recovered" if recovered else ""),
-        title=f"Battery pack offline: {packs_txt}" if online is not None and packs else f"Discharge limit dropped to {worst:g} A",
+        title=("Battery communication lost (limits fell to 0 A)" if worst == 0 else
+               f"Battery pack offline: {packs_txt}" if online is not None and packs else f"Discharge limit dropped to {worst:g} A"),
         detail=detail,
         action="Check which pack dropped out in the per-pack view, then its breaker, communication cable and "
                "terminal torque. A pack that drops and rejoins is the start of the August failure pattern.",
         facts=[("Limit", f"{worst:g} A of {expected:g} A"), ("First", f"{_day(first)} {_hm(first)}"),
                ("Last", f"{_day(last)} {_hm(last)}")],
     )
+
+COLD_DERATE_C = 17.0  # cell temp at or below which a discharge-only limit is put down to cold
+
+
+def _discharge_derate(c: Ctx, low: list[int], limit: list[float | None], expected: float, worst: float,
+                      first, last, recovered: bool) -> Check:
+    temps = [t for t in (c.log.f("MaxCellTemp")[i] for i in low) if t is not None]
+    socs = [s for s in (c.log.f("SOC(%)")[i] for i in low) if s is not None]
+    cold = bool(temps) and min(temps) <= COLD_DERATE_C
+    span = _hours(len(low) * c.log.interval)
+    kw = worst * (c.settings.get("nominal_battery_v") or 51.2) / 1000
+    why = (f"the cells were cold ({min(temps):.0f}-{max(temps):.0f} °C)" if cold
+           else "the BMS lowered it" + (f" at {min(socs):.0f}-{max(socs):.0f}% SOC" if socs else ""))
+    detail = (f"The BMS cut its discharge limit to {worst:g} A (of {expected:g} A) "
+              + ("from the start of the range" if low[0] == 0 else f"from {_day(first)} {_hm(first)}")
+              + (f" until {_day(last)} {_hm(last)}" if recovered else ", and it had not recovered yet")
+              + f", {span} in all, because {why}. The charge limit stayed at the full {expected:g} A, so every pack "
+              f"was still online: this is a deliberate current limit, not a dropout. {worst:g} A is about "
+              f"{kw:.0f} kW from the battery.")
+    if cold:
+        detail += " It lifts on its own once the cells warm to about 16-17 °C."
+    severity = "watch" if worst <= expected * 0.25 else "info"
+    return Check(
+        "battery_packs_online", severity,
+        f"All packs online; discharge limited to {worst:g} A for {span}" + (" (cold cells)" if cold else ""),
+        title=("Cold batteries limited discharge" if cold else "BMS limited discharge") + f" to {worst:g} A",
+        detail=detail,
+        action=("None. Only a limit this low can cap the house, and mostly at low SOC; keep the battery space "
+                "warmer if it keeps happening." if severity == "watch" else "None."),
+        facts=[("Discharge limit", f"{worst:g} A of {expected:g} A"), ("Charge limit", f"{expected:g} A (full)")]
+              + ([("Cell temp", f"{min(temps):.0f}-{max(temps):.0f} °C")] if temps else [])
+              + [("First", f"{_day(first)} {_hm(first)}"), ("Last", f"{_day(last)} {_hm(last)}")],
+    )
+
 
 def rule_battery_cell_balance(c: Ctx) -> Check:
     cmax, cmin = c.log.f("MaxCellVoltage"), c.log.f("MinCellVoltage")
